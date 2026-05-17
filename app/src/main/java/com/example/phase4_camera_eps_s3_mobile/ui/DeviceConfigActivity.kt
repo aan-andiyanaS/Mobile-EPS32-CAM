@@ -95,20 +95,24 @@ class DeviceConfigActivity : AppCompatActivity() {
         }
     }
 
-    private fun observeState() {
-        lifecycleScope.launch {
-            bleManager.connectionState.collectLatest { state ->
-                updateConnectionUI(state)
-            }
-        }
-
-        // Gunakan collect (bukan collectLatest) agar tidak ada data BLE yang terlewat
-        lifecycleScope.launch {
-            bleManager.receivedData.collect { data ->
-                processReceivedData(data)
-            }
+private fun observeState() {
+    lifecycleScope.launch {
+        bleManager.connectionState.collectLatest { state ->
+            updateConnectionUI(state)
         }
     }
+
+    // FIX: Karena bleScope sekarang Dispatchers.IO, emit dari BleManager
+    // terjadi di IO thread. collectLatest/collect di lifecycleScope (Main)
+    // sudah otomatis switch ke Main — tidak perlu runOnUiThread manual.
+    // Ganti collect → collectLatest TIDAK boleh — karena data WiFi harus
+    // semua diterima (BATCH 1, BATCH 2, dst). Tetap pakai collect.
+    lifecycleScope.launch(Dispatchers.Main.immediate) {
+        bleManager.receivedData.collect { data ->
+            processReceivedData(data)
+        }
+    }
+}
 
     private fun updateConnectionUI(state: BleManager.ConnectionState) {
         when (state) {

@@ -14,129 +14,13 @@
         android:scaleType="fitCenter"
         android:contentDescription="Camera Stream" />
 
-    <!-- Sensor Alert Banner (muncul saat sensor tidak ditemukan) -->
-    <LinearLayout
-        android:id="@+id/layoutAlerts"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top"
-        android:orientation="vertical"
-        android:padding="8dp"
-        android:background="#CC880000"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/tvAlertMessage"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:fontFamily="monospace"
-            android:text="" />
-    </LinearLayout>
-
-    <!-- IMU + ToF Overlay (kanan atas) -->
-    <LinearLayout
-        android:id="@+id/layoutSensorData"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:orientation="vertical"
-        android:padding="8dp"
-        android:background="#99000000"
-        android:layout_margin="8dp"
-        android:visibility="gone">
-
-        <!-- IMU Data -->
-        <TextView
-            android:id="@+id/tvImuLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="── IMU (MPU6050) ──"
-            android:textColor="#4FC3F7"
-            android:textSize="10sp"
-            android:fontFamily="monospace" />
-
-        <TextView
-            android:id="@+id/tvPitch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Pitch: --°"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:fontFamily="monospace" />
-
-        <TextView
-            android:id="@+id/tvRoll"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Roll : --°"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:fontFamily="monospace" />
-
-        <TextView
-            android:id="@+id/tvYawRate"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="ω z  : -- rad/s"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:fontFamily="monospace" />
-
-        <TextView
-            android:id="@+id/tvALin"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Alin : -- m/s²"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:fontFamily="monospace" />
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#44FFFFFF"
-            android:layout_marginVertical="4dp" />
-
-        <!-- ToF Data -->
-        <TextView
-            android:id="@+id/tvTofLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="── ToF (VL53L5CX) ──"
-            android:textColor="#81C784"
-            android:textSize="10sp"
-            android:fontFamily="monospace" />
-
-        <TextView
-            android:id="@+id/tvTofMin"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Min : -- mm"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:fontFamily="monospace" />
-
-        <!-- Grid 8x8 sederhana (text) -->
-        <TextView
-            android:id="@+id/tvTofGrid"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text=""
-            android:textColor="#B2DFDB"
-            android:textSize="9sp"
-            android:fontFamily="monospace"
-            android:lineSpacingExtra="0dp" />
-    </LinearLayout>
-
-    <!-- Bottom Overlay: Status + Controls -->
+    <!-- Overlay: Status + Controls -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:orientation="vertical"
-        android:padding="12dp"
+        android:padding="16dp"
         android:background="#80000000">
 
         <ProgressBar
@@ -153,7 +37,7 @@
             android:text="Connecting..."
             android:textColor="#FFFFFF"
             android:textAlignment="center"
-            android:textSize="13sp" />
+            android:textSize="14sp" />
 
         <TextView
             android:id="@+id/tvError"
@@ -161,8 +45,8 @@
             android:layout_height="wrap_content"
             android:textColor="#FF5252"
             android:textAlignment="center"
-            android:textSize="13sp"
-            android:layout_marginTop="4dp"
+            android:textSize="14sp"
+            android:layout_marginTop="8dp"
             android:visibility="gone" />
 
         <Button
@@ -171,7 +55,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center"
             android:text="Reconnect"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="8dp"
             android:visibility="gone" />
 
     </LinearLayout>
