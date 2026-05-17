@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    tools:context=".ui.DeviceConfigActivity">
+
+    <!-- Connection Status -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="16dp">
+
+        <ProgressBar
+            android:id="@+id/progressConnection"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginEnd="8dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Connecting..."
+            android:textSize="16sp" />
+    </LinearLayout>
+
+    <!-- WiFi Scan Section -->
+    <Button
+        android:id="@+id/btnScanWifi"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Scan WiFi Networks"
+        android:enabled="false" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="8dp">
+
+        <ProgressBar
+            android:id="@+id/progressWifi"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginEnd="8dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvScanStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Press button to scan WiFi"
+            android:textColor="#666666" />
+    </LinearLayout>
+
+    <!-- WiFi List -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerWifi"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!-- View Camera Button — tampil setelah WiFi terkoneksi dan IP didapat -->
+    <Button
+        android:id="@+id/btnViewCamera"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="📷 View Camera"
+        android:layout_marginTop="8dp"
+        android:visibility="gone" />
+
+</LinearLayout>
