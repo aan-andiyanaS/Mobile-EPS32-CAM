@@ -20,6 +20,35 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!-- Foreground Service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!--
+        KONEKSI STABIL (safety-critical):
+        WAKE_LOCK       — cegah CPU sleep selama streaming aktif
+        ACCESS_WIFI_STATE / CHANGE_WIFI_STATE — WifiLock agar radio WiFi
+                          tidak masuk power-saving mode (mengurangi latency)
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
+    <!--
+        NOTIFIKASI HEADS-UP (pop-up seperti WhatsApp):
+        POST_NOTIFICATIONS wajib di Android 13+ (API 33+) agar
+        notifikasi "ESP32-S3 Terkoneksi" muncul sebagai heads-up.
+        Permission ini di-request runtime dari CameraStreamActivity.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+        BATTERY OPTIMIZATION BYPASS (opsional, direkomendasikan untuk sistem safety):
+        Memungkinkan app meminta user untuk mengecualikan app dari Doze mode.
+        Tanpa ini, Android bisa membatasi network access saat layar mati.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <application
@@ -50,7 +79,14 @@
 
         <activity
             android:name=".ui.CameraStreamActivity"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.ESP32Config" />
+
+        <service
+            android:name=".service.CameraStreamService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
     </application>
 

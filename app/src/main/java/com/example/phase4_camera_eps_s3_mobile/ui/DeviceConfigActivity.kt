@@ -23,6 +23,7 @@ import com.example.phase4_camera_eps_s3_mobile.model.WifiInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import com.example.phase4_camera_eps_s3_mobile.util.SessionManager
 
 /**
  * DeviceConfigActivity - WiFi Configuration screen
@@ -41,6 +42,7 @@ class DeviceConfigActivity : AppCompatActivity() {
     // IP ESP32 yang didapat setelah koneksi WiFi berhasil
     // Dikirim via intent dari MainActivity atau diparse dari response ESP32
     private var esp32IpAddress: String = ""
+    private lateinit var sessionManager: SessionManager
 
     // Dialog untuk input password
     private var passwordDialog: AlertDialog? = null
@@ -59,6 +61,8 @@ class DeviceConfigActivity : AppCompatActivity() {
 
         supportActionBar?.title = deviceName
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
+
+        sessionManager = SessionManager(this)
 
         bleManager = BleManager(this)
         setupRecyclerView()
@@ -204,6 +208,9 @@ private fun observeState() {
                 if (ip.isNotEmpty()) {
                     esp32IpAddress = ip
                     android.util.Log.d("DeviceConfig", "ESP32 IP received: $esp32IpAddress")
+                    // Simpan IP ke SharedPreferences agar saat app dibuka ulang
+                    // tidak perlu scan BLE lagi
+                    sessionManager.saveEsp32Ip(ip)
                     updateCameraButtonVisibility()
                 }
             }

@@ -14,7 +14,7 @@
         android:scaleType="fitCenter"
         android:contentDescription="Camera Stream" />
 
-    <!-- Overlay: Status + Controls -->
+    <!-- Overlay: Status + Controls (bottom) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -59,5 +59,22 @@
             android:visibility="gone" />
 
     </LinearLayout>
+
+    <!-- Badge koneksi: muncul di pojok kanan atas saat WebSocket berhasil terbuka -->
+    <TextView
+        android:id="@+id/tvConnectedBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="12dp"
+        android:paddingLeft="10dp"
+        android:paddingRight="10dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:text="&#9679; Menerima data dari ESP32-S3"
+        android:textColor="#FFFFFF"
+        android:textSize="11sp"
+        android:background="@drawable/badge_connected_bg"
+        android:visibility="gone" />
 
 </FrameLayout>
