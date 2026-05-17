@@ -231,31 +231,38 @@ class BleManager(private val context: Context) {
         bluetoothGatt?.disconnect()
     }
 
-    fun sendCommand(command: String): Boolean {
-        val char = commandCharacteristic ?: run {
-            Log.e(TAG, "sendCommand failed: characteristic null")
-            return false
-        }
-        val gatt = bluetoothGatt ?: run {
-            Log.e(TAG, "sendCommand failed: gatt null")
-            return false
-        }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val result = gatt.writeCharacteristic(
-                char,
-                command.toByteArray(Charsets.UTF_8),
-                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            )
-            (result == BluetoothStatusCodes.SUCCESS).also {
-                if (!it) Log.e(TAG, "writeCharacteristic API33 failed, code=$result")
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            char.setValue(command)
-            @Suppress("DEPRECATION")
-            gatt.writeCharacteristic(char)
-        }
+fun sendCommand(command: String): Boolean {
+    Log.d(TAG, "sendCommand called: '$command'")
+
+    val characteristic = commandCharacteristic ?: run {
+        Log.e(TAG, "sendCommand failed: commandCharacteristic is null")
+        return false
     }
+
+    val gatt = bluetoothGatt ?: run {
+        Log.e(TAG, "sendCommand failed: bluetoothGatt is null")
+        return false
+    }
+
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val result = gatt.writeCharacteristic(
+            characteristic,
+            command.toByteArray(Charsets.UTF_8),
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        )
+        if (result != BluetoothStatusCodes.SUCCESS) {
+            Log.e(TAG, "writeCharacteristic failed, code=$result")
+            false
+        } else {
+            true
+        }
+    } else {
+        @Suppress("DEPRECATION")
+        characteristic.value = command.toByteArray(Charsets.UTF_8)
+        @Suppress("DEPRECATION")
+        gatt.writeCharacteristic(characteristic)
+    }
+}
 
     fun scanWifi(): Boolean = sendCommand("SCAN")
 
