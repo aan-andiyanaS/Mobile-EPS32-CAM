@@ -20,6 +20,7 @@ import com.example.phase4_camera_eps_s3_mobile.databinding.ActivityDeviceConfigB
 import com.example.phase4_camera_eps_s3_mobile.databinding.DialogWifiPasswordBinding
 import com.example.phase4_camera_eps_s3_mobile.databinding.ItemWifiBinding
 import com.example.phase4_camera_eps_s3_mobile.model.WifiInfo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
