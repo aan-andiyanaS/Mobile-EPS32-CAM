@@ -313,5 +313,5 @@ Library Manager (`Ctrl+Shift+I`):
 
 ## Lihat Juga
 
-- 📱 **Android App** → [`phase4-camera-eps-s3-mobile/README.md`](../../../phase4-camera-eps-s3-mobile/README.md)
+- 📱 **Android App** → [`phase4-camera-eps-s3-mobile/README.md`](../README.md)
 - 📊 **Wiring Diagram** → [`wiring-diagram.md`](./wiring-diagram.md)

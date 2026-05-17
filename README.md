@@ -362,5 +362,5 @@ phase4-camera-eps-s3-mobile/
 
 ## Lihat Juga
 
-- 🔌 **ESP32 Firmware** → [`eps32s3_camera_with_mobile/README.md`](../phase3-transfer-camera-to-smarphone-via-wifi/esp32/eps32s3_camera_with_mobile/README.md)
-- 📡 **Protokol WebSocket** → Lihat bagian [Protokol WebSocket](../phase3-transfer-camera-to-smarphone-via-wifi/esp32/eps32s3_camera_with_mobile/README.md#protokol-websocket) di README firmware
+- 🔌 **ESP32 Firmware** → [`eps32s3_camera_with_mobile/README.md`](eps32s3_camera_with_mobile/README.md)
+- 📡 **Protokol WebSocket** → Lihat bagian [Protokol WebSocket](eps32s3_camera_with_mobile/README.md#protokol-websocket) di README firmware
