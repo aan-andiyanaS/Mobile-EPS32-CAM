@@ -70,35 +70,35 @@ ESP32-S3 bertindak sebagai **server kamera embedded** dengan dua mode operasi:
 
 ```mermaid
 flowchart TD
-    A([Boot / Power ON]) --> B{Cek credential\nWiFi di NVS?}
+    A([Boot / Power ON]) --> B{Cek credential<br/>WiFi di NVS?}
 
-    B -- Ada --> C[Auto-connect WiFi]
-    B -- Tidak ada --> D[Init BLE\nMulai advertising]
+    B -->|Ada| C[Auto-connect WiFi]
+    B -->|Tidak ada| D[Init BLE<br/>Mulai advertising]
 
-    C --> E{WiFi berhasil\nterkoneksi?}
-    E -- Ya --> F[WiFi.setSleep OFF\nInit WebSocket Server]
-    E -- Tidak, 20 detik timeout --> D
+    C --> E{WiFi berhasil<br/>terkoneksi?}
+    E -->|Ya| F[WiFi.setSleep OFF<br/>Init WebSocket Server]
+    E -->|Tidak, 20 detik timeout| D
 
-    D --> G[LED Biru berkedip\nTunggu koneksi Android]
-    G --> H{Android scan\n& connect via BLE}
+    D --> G[LED Biru berkedip<br/>Tunggu koneksi Android]
+    G --> H{Android scan<br/>& connect via BLE}
     H --> I[Android kirim list WiFi request]
-    I --> J[ESP32 scan WiFi\nKirim SSID list via BLE]
-    J --> K[User pilih SSID\n& kirim password]
-    K --> L[ESP32 simpan ke NVS\nConnect WiFi]
+    I --> J[ESP32 scan WiFi<br/>Kirim SSID list via BLE]
+    J --> K[User pilih SSID<br/>& kirim password]
+    K --> L[ESP32 simpan ke NVS<br/>Connect WiFi]
     L --> M{Berhasil?}
-    M -- Ya --> N[Kirim IP ke Android\nvia BLE: IP:x.x.x.x]
-    M -- Tidak --> O[Kirim ERROR via BLE]
-    N --> P[BLE Off\nHemat daya]
+    M -->|Ya| N[Kirim IP ke Android<br/>via BLE: IP x.x.x.x]
+    M -->|Tidak| O[Kirim ERROR via BLE]
+    N --> P[BLE Off<br/>Hemat daya]
     P --> F
     O --> G
 
-    F --> Q[LED Hijau\nServer siap di ws://IP/ws]
-    Q --> R[Loop: Capture & Stream\n15 FPS via WebSocket]
+    F --> Q[LED Hijau<br/>Server siap di ws://IP/ws]
+    Q --> R[Loop: Capture & Stream<br/>15 FPS via WebSocket]
     
-    R --> S{Klien Disconnect\n> 30 Detik?}
-    S -- Ya --> T[Power Save Mode\nSuspend Capture & LED Merah Pelan]
+    R --> S{Klien Disconnect<br/>> 30 Detik?}
+    S -->|Ya| T[Power Save Mode<br/>Suspend Capture & LED Merah Pelan]
     T --> U{Klien Reconnect?}
-    U -- Ya --> R
+    U -->|Ya| R
 ```
 
 ### Flowchart BLE Provisioning Detail
@@ -106,26 +106,26 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant ESP as ESP32-S3
-    participant AND as Android App
+    participant APP as Android App
 
-    AND->>ESP: BLE Connect
-    ESP->>AND: BLE Connection OK
+    APP->>ESP: BLE Connect
+    ESP->>APP: BLE Connection OK
 
-    AND->>ESP: Command: "SCAN_WIFI"
+    APP->>ESP: Command: "SCAN_WIFI"
     ESP->>ESP: Scan jaringan WiFi
-    ESP->>AND: Response: "WIFI_LIST:SSID1,SSID2,SSID3"
+    ESP->>APP: Response: "WIFI_LIST:SSID1,SSID2,SSID3"
 
-    AND->>ESP: Command: "CONNECT:SSID|password"
+    APP->>ESP: Command: "CONNECT:SSID|password"
     ESP->>ESP: Simpan ke NVS
     ESP->>ESP: WiFi.begin(ssid, pass)
 
     alt WiFi berhasil
-        ESP->>AND: Response: "IP:192.168.1.xxx"
+        ESP->>APP: Response: "IP:192.168.1.xxx"
         ESP->>ESP: BLE Off, start WebSocket
-        AND->>ESP: WebSocket Connect ws://192.168.1.xxx/ws
-        ESP-->>AND: Binary stream JPEG frames
+        APP->>ESP: WebSocket Connect ws://192.168.1.xxx/ws
+        ESP-->>APP: Binary stream JPEG frames
     else WiFi gagal
-        ESP->>AND: Response: "ERROR:Connection failed"
+        ESP->>APP: Response: "ERROR:Connection failed"
     end
 ```
 
@@ -133,18 +133,18 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    A([Tekan BOOT Button]) --> B{Tahan > 0s\n< 1.6s}
-    B --> C[LED Orange\nPhase 1/3]
-    C --> D{Tahan > 1.6s\n< 3.3s}
-    D --> E[LED Kuning\nPhase 2/3]
-    E --> F{Tahan > 3.3s\n< 5.0s}
-    F --> G[LED Merah\nPhase 3/3]
+    A([Tekan BOOT Button]) --> B{Tahan > 0s<br/>< 1.6s}
+    B --> C[LED Orange<br/>Phase 1/3]
+    C --> D{Tahan > 1.6s<br/>< 3.3s}
+    D --> E[LED Kuning<br/>Phase 2/3]
+    E --> F{Tahan > 3.3s<br/>< 5.0s}
+    F --> G[LED Merah<br/>Phase 3/3]
     G --> H{Tahan >= 5.0s?}
-    H -- Ya --> I[6x Blink Putih Cepat]
-    H -- Tidak, lepas sebelum 5s --> Z([Batal - Tidak ada reset])
-    I --> J[LED Magenta\nReset NVS credential]
+    H -->|Ya| I[6x Blink Putih Cepat]
+    H -->|Tidak, lepas sebelum 5s| Z([Batal - Tidak ada reset])
+    I --> J[LED Magenta<br/>Reset NVS credential]
     J --> K[Restart BLE Advertising]
-    K --> L([LED Biru berkedip\nSiap provisioning ulang])
+    K --> L([LED Biru berkedip<br/>Siap provisioning ulang])
 ```
 
 ---
