@@ -102,36 +102,36 @@ graph TB
 flowchart TD
     START([Buka Aplikasi]) --> CHECK{SessionManager:\nIP tersimpan?}
 
-    CHECK -- Ya --> BG_PING[Background Ping TCP port 80\nTampilkan Banner Batal]
-    CHECK -- Tidak ada --> MAIN[MainActivity\nBLE Scanner]
+    CHECK -->|Ya| BG_PING["Background Ping TCP port 80\nTampilkan Banner Batal"]
+    CHECK -->|Tidak ada| MAIN["MainActivity\nBLE Scanner"]
     
-    BG_PING -- Sukses --> RESUME[Buka CameraStreamActivity]
-    BG_PING -- Batal/Gagal --> MAIN
+    BG_PING -->|Sukses| RESUME["Buka CameraStreamActivity"]
+    BG_PING -->|"Batal/Gagal"| MAIN
 
     MAIN --> PERM{Izin BLE\ndan Lokasi?}
-    PERM -- Belum --> REQ[Request Runtime\nPermissions]
+    PERM -->|Belum| REQ["Request Runtime\nPermissions"]
     REQ --> PERM
-    PERM -- Sudah --> SCAN[Scan BLE Devices\nCari ESP32-S3]
+    PERM -->|Sudah| SCAN["Scan BLE Devices\nCari ESP32-S3"]
 
     SCAN --> FOUND{ESP32-S3\nditemukan?}
-    FOUND -- Tidak --> SCAN
-    FOUND -- Ya --> CONFIG[DeviceConfigActivity\nPilih jaringan WiFi]
+    FOUND -->|Tidak| SCAN
+    FOUND -->|Ya| CONFIG["DeviceConfigActivity\nPilih jaringan WiFi"]
 
-    CONFIG --> SEND[Kirim SSID + Password\nke ESP32 via BLE]
+    CONFIG --> SEND["Kirim SSID + Password\nke ESP32 via BLE"]
     SEND --> WAIT{Terima IP\ndari ESP32?}
-    WAIT -- ERROR --> CONFIG
-    WAIT -- IP:x.x.x.x --> SAVE[Simpan IP ke\nSessionManager]
+    WAIT -->|ERROR| CONFIG
+    WAIT -->|"IP:x.x.x.x"| SAVE["Simpan IP ke\nSessionManager"]
 
-    SAVE --> SERVICE[Start CameraStreamService\nForeground Service]
-    SERVICE --> CAMERA[CameraStreamActivity\nLive Camera View]
+    SAVE --> SERVICE["Start CameraStreamService\nForeground Service"]
+    SERVICE --> CAMERA["CameraStreamActivity\nLive Camera View"]
     RESUME --> CAMERA
 
     CAMERA --> BACK{User tekan\nAkhiri?}
-    BACK --> EXIT[Kirim Broadcast ACTION_EXIT_APP\nfinishAffinity()]
-    EXIT --> NOTIF[Muncul Notifikasi Persisten\n'Sesi Dihentikan']
+    BACK --> EXIT["Kirim Broadcast ACTION_EXIT_APP\nfinishAffinity()"]
+    EXIT --> NOTIF["Muncul Notifikasi Persisten\nSesi Dihentikan"]
     
     NOTIF --> REOPEN{Klik Notifikasi?}
-    REOPEN --> START
+    REOPEN -->|Ya| START
 ```
 
 ### Flowchart Background Service
