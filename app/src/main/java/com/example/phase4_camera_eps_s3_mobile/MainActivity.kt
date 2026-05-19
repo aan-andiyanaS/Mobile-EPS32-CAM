@@ -209,7 +209,7 @@ class MainActivity : AppCompatActivity() {
                 var socket: Socket? = null
                 val isOnline = try {
                     socket = Socket()
-                    socket.connect(InetSocketAddress(ipAddress, 81), 1000)
+                    socket.connect(InetSocketAddress(ipAddress, 80), 1000)
                     true
                 } catch (e: Exception) {
                     false
