@@ -14,12 +14,16 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.GestureDetectorCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.phase4_camera_eps_s3_mobile.databinding.ActivityCameraStreamBinding
 import com.example.phase4_camera_eps_s3_mobile.service.CameraStreamService
@@ -30,33 +34,26 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * CameraStreamActivity — menampilkan frame kamera dari WebSocket.
- * Koneksi WebSocket dikelola oleh CameraStreamService (Foreground Service).
+ * CameraStreamActivity v5 — Simplified
  *
- * Fitur:
- *  - onBackPressed     → moveTaskToBack(true): app minimize, Service TETAP jalan.
- *  - singleTop         → notifikasi ditekan saat Activity sudah ada di top → onNewIntent().
- *  - Badge koneksi     → muncul di pojok kanan atas saat WebSocket berhasil terbuka.
- *  - Notifikasi sistem → update otomatis sesuai state: CONNECTING / CONNECTED / DISCONNECTED.
- *
- * Auto-redirect ke halaman ini:
- *  - Saat app dibuka ulang dari launcher (bukan swipe dari recent), MainActivity
- *    membaca IP dari SessionManager dan langsung startActivity ke sini.
- *  - Saat app di-minimize (moveTaskToBack), launcher membawa task yang sudah ada
- *    ke foreground (CameraStreamActivity tetap di atas stack).
+ * Flow:
+ *  - onStart(): bind ke service (service sudah berjalan dari onCreate pertama)
+ *  - Tombol "Akhiri": stop service + tutup SEMUA activity (finishAffinity)
+ *    IP tetap tersimpan → buka app lagi langsung ke kamera
+ *  - Back button: moveTaskToBack (app minimize, service tetap jalan)
+ *  - Saat ESP32 mati: service auto-reconnect (exponential backoff)
+ *  - Saat ESP32 nyala lagi: service reconnect otomatis, kamera hidup kembali
  */
 class CameraStreamActivity : AppCompatActivity() {
 
     companion object {
         private const val EXTRA_IP = "esp32_ip"
 
-        fun createIntent(context: Context, ipAddress: String): Intent {
-            // FLAG_ACTIVITY_SINGLE_TOP mencegah instance baru jika activity sudah ada di top
-            return Intent(context, CameraStreamActivity::class.java).apply {
+        fun createIntent(context: Context, ipAddress: String): Intent =
+            Intent(context, CameraStreamActivity::class.java).apply {
                 putExtra(EXTRA_IP, ipAddress)
                 addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
-        }
     }
 
     private lateinit var binding:        ActivityCameraStreamBinding
@@ -72,9 +69,16 @@ class CameraStreamActivity : AppCompatActivity() {
     private var frameCount     = 0
     private var fpsWindowStart = 0L
 
+    // Swipe gesture untuk badge koneksi
+    private var badgeSwipeRevealed = false
+
+    // Guard: cegah double-execute akhiriProses
+    private var isAkhiring = false
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            val binder = service as CameraStreamService.LocalBinder
+            if (isDestroyed || isFinishing) return
+            val binder = service as? CameraStreamService.LocalBinder ?: return
             streamService = binder.getService()
             isBound       = true
             startCollectingFrames()
@@ -82,10 +86,15 @@ class CameraStreamActivity : AppCompatActivity() {
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+            // Service crash/killed — bukan stop normal
             streamService = null
             isBound       = false
-            showStreamState(StreamState.ERROR("Koneksi ke service terputus. Tekan Reconnect."))
-            hideBadge()
+            runOnUiThread {
+                if (!isDestroyed && !isFinishing && !isAkhiring) {
+                    showStreamStateSafe(StreamState.ERROR("Koneksi service terputus. Tekan Reconnect."))
+                    hideBadgeSafe()
+                }
+            }
         }
     }
 
@@ -98,7 +107,6 @@ class CameraStreamActivity : AppCompatActivity() {
         binding = ActivityCameraStreamBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Layar tetap menyala selama streaming
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         ipAddress = intent.getStringExtra(EXTRA_IP) ?: run {
@@ -112,79 +120,17 @@ class CameraStreamActivity : AppCompatActivity() {
         supportActionBar?.title = "Live Camera — $ipAddress"
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
+        setupBadgeSwipeGesture()
         setupClickListeners()
-        showStreamState(StreamState.CONNECTING)
+        showStreamStateSafe(StreamState.CONNECTING)
 
-        // Request izin notifikasi (Android 13+) agar heads-up notification muncul
         requestNotificationPermission()
-        // Minta user kecualikan app dari battery optimization (penting untuk sistem safety)
         requestBatteryOptimizationBypass()
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Runtime permissions
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private val notifPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (!granted) {
-            Toast.makeText(
-                this,
-                "Izin notifikasi ditolak — heads-up alert tidak akan muncul",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // API 33
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
-
-    /**
-     * Minta user mengecualikan app dari battery optimization.
-     * Tanpa ini, Android Doze mode bisa membatasi akses network saat layar mati,
-     * yang dapat memutus koneksi WebSocket ke ESP32-S3 secara tiba-tiba.
-     */
-    private fun requestBatteryOptimizationBypass() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = getSystemService(POWER_SERVICE) as PowerManager
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                try {
-                    startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                        data = Uri.parse("package:$packageName")
-                    })
-                } catch (e: Exception) {
-                    // Beberapa device tidak mendukung intent ini — abaikan
-                }
-            }
-        }
-    }
-
-    /**
-     * Dipanggil saat notifikasi ditekan dan activity sudah ada di back stack (singleTop).
-     */
-    override fun onNewIntent(intent: Intent?) {
-        super.onNewIntent(intent)
-        val newIp = intent?.getStringExtra(EXTRA_IP)
-        if (!newIp.isNullOrEmpty() && newIp != ipAddress) {
-            ipAddress = newIp
-            supportActionBar?.title = "Live Camera — $ipAddress"
-            // Restart service dengan IP baru
-            val serviceIntent = CameraStreamService.createStartIntent(this, ipAddress)
-            stopService(serviceIntent)
-            startService(serviceIntent)
-        }
     }
 
     override fun onStart() {
         super.onStart()
+        if (ipAddress.isEmpty()) return
         val serviceIntent = CameraStreamService.createStartIntent(this, ipAddress)
         startService(serviceIntent)
         bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
@@ -192,13 +138,9 @@ class CameraStreamActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Unbind TANPA stop service — service tetap jalan di background
-        frameCollectJob?.cancel()
-        frameCollectJob = null
-        stateCollectJob?.cancel()
-        stateCollectJob = null
+        cancelAllJobs()
         if (isBound) {
-            unbindService(serviceConnection)
+            runCatching { unbindService(serviceConnection) }
             isBound       = false
             streamService = null
         }
@@ -207,22 +149,55 @@ class CameraStreamActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        // Tidak stop service di onDestroy — service tetap hidup untuk background streaming
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Back button: minimize app, BUKAN finish Activity
-    // Service tetap hidup → WebSocket tetap terkoneksi ke ESP32-S3
-    // ──────────────────────────────────────────────────────────────────────────
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        val newIp = intent?.getStringExtra(EXTRA_IP)
+        if (!newIp.isNullOrEmpty() && newIp != ipAddress) {
+            ipAddress = newIp
+            supportActionBar?.title = "Live Camera — $ipAddress"
+            val si = CameraStreamService.createStartIntent(this, ipAddress)
+            stopService(si); startService(si)
+        }
+    }
 
+    // Back → minimize, service tetap jalan
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         moveTaskToBack(true)
     }
 
-    override fun onSupportNavigateUp(): Boolean {
-        moveTaskToBack(true)
-        return true
+    override fun onSupportNavigateUp(): Boolean { moveTaskToBack(true); return true }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Runtime permissions
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private val notifPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* tidak masalah jika ditolak, streaming tetap jalan */ }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    private fun requestBatteryOptimizationBypass() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                runCatching {
+                    startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    })
+                }
+            }
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -230,47 +205,86 @@ class CameraStreamActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────────────────────────────────
 
     private fun setupClickListeners() {
+        // Tombol Reconnect (muncul saat error)
         binding.btnReconnect.setOnClickListener {
-            binding.btnReconnect.visibility = View.GONE
-            showStreamState(StreamState.CONNECTING)
-            hideBadge()
-            val serviceIntent = CameraStreamService.createStartIntent(this, ipAddress)
-            stopService(serviceIntent)
-            startService(serviceIntent)
-            bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+            if (isDestroyed || isFinishing) return@setOnClickListener
+            showStreamStateSafe(StreamState.CONNECTING)
+            hideBadgeSafe()
+            val si = CameraStreamService.createStartIntent(this, ipAddress)
+            stopService(si)
+            startService(si)
+            if (!isBound) bindService(si, serviceConnection, Context.BIND_AUTO_CREATE)
         }
 
-        binding.ivCameraFrame.setOnClickListener {
-            toggleFullscreen()
+        // Tombol Akhiri di panel bawah
+        binding.btnAkhiri.setOnClickListener {
+            if (!isDestroyed && !isFinishing) konfirmasiAkhiriProses()
         }
+
+        // Tombol Akhiri yang muncul saat badge di-swipe
+        binding.btnAkhiriBadge.setOnClickListener {
+            if (!isDestroyed && !isFinishing) konfirmasiAkhiriProses()
+        }
+
+        binding.ivCameraFrame.setOnClickListener { toggleFullscreen() }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Connection state observer — kontrol badge + StreamState UI
+    // Swipe gesture badge
+    // ──────────────────────────────────────────────────────────────────────────
+
+    @Suppress("ClickableViewAccessibility")
+    private fun setupBadgeSwipeGesture() {
+        val detector = GestureDetectorCompat(this,
+            object : GestureDetector.SimpleOnGestureListener() {
+                override fun onFling(
+                    e1: MotionEvent?, e2: MotionEvent,
+                    velocityX: Float, velocityY: Float
+                ): Boolean {
+                    val diffX = e2.x - (e1?.x ?: e2.x)
+                    return if (Math.abs(diffX) > 80f && Math.abs(velocityX) > 100f) {
+                        badgeSwipeRevealed = !badgeSwipeRevealed
+                        if (!isDestroyed && !isFinishing) {
+                            binding.btnAkhiriBadge.visibility =
+                                if (badgeSwipeRevealed) View.VISIBLE else View.GONE
+                            binding.tvConnectedBadge.text =
+                                if (badgeSwipeRevealed) "● Terhubung  ✕ tutup"
+                                else "● Menerima data dari ESP32-S3  ‹ geser"
+                        }
+                        true
+                    } else false
+                }
+                override fun onDown(e: MotionEvent): Boolean = true
+            }
+        )
+
+        binding.badgeSwipeContainer.setOnTouchListener { _, event -> detector.onTouchEvent(event) }
+        binding.tvConnectedBadge.setOnTouchListener  { _, event -> detector.onTouchEvent(event) }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Observer connectionState dari service
     // ──────────────────────────────────────────────────────────────────────────
 
     private fun startObservingConnectionState() {
         stateCollectJob?.cancel()
         stateCollectJob = lifecycleScope.launch {
             streamService?.connectionState?.collect { state ->
+                if (isDestroyed || isFinishing || isAkhiring) return@collect
                 when (state) {
-                    CameraStreamService.ConnectionState.CONNECTED -> {
-                        showBadge()
+                    CameraStreamService.ConnectionState.CONNECTED    -> showBadgeSafe()
+                    CameraStreamService.ConnectionState.CONNECTING   -> {
+                        hideBadgeSafe()
+                        showStreamStateSafe(StreamState.CONNECTING)
                     }
-                    CameraStreamService.ConnectionState.CONNECTING -> {
-                        hideBadge()
-                        showStreamState(StreamState.CONNECTING)
-                    }
-                    CameraStreamService.ConnectionState.DISCONNECTED -> {
-                        hideBadge()
-                    }
+                    CameraStreamService.ConnectionState.DISCONNECTED -> hideBadgeSafe()
                 }
             }
         }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Frame collection dari Service
+    // Frame collection
     // ──────────────────────────────────────────────────────────────────────────
 
     private fun startCollectingFrames() {
@@ -278,122 +292,168 @@ class CameraStreamActivity : AppCompatActivity() {
         frameCount     = 0
         fpsWindowStart = System.currentTimeMillis()
 
-        // FIX LATENSI KRITIS: Jalankan di Dispatchers.Default (thread pool CPU)
-        // BUKAN di Dispatchers.Main. Sebelumnya decode JPEG (10-30ms) memblokir
-        // UI thread sehingga frame-frame berikutnya tertunda dan menyebabkan lag.
         frameCollectJob = lifecycleScope.launch(Dispatchers.Default) {
-            // Update UI dari thread lain harus via withContext(Main)
-            withContext(Dispatchers.Main) { showStreamState(StreamState.STREAMING) }
+            withContext(Dispatchers.Main) {
+                if (!isDestroyed && !isFinishing) showStreamStateSafe(StreamState.STREAMING)
+            }
 
-            // Reuse Options di luar loop — hindari alokasi objek per frame
             val options = BitmapFactory.Options().apply {
-                inPreferredConfig = Bitmap.Config.RGB_565  // 50% hemat memori vs ARGB_8888
-                inMutable         = true                   // Enable bitmap reuse di masa depan
+                inPreferredConfig = Bitmap.Config.RGB_565
+                inMutable         = true
             }
 
             try {
                 streamService?.frameFlow?.collect { jpegBytes ->
-                    // Decode JPEG di background thread (Default dispatcher)
-                    val bitmap = BitmapFactory.decodeByteArray(
-                        jpegBytes, 0, jpegBytes.size, options
-                    ) ?: return@collect
+                    if (isDestroyed || isFinishing || isAkhiring) return@collect
+                    val bitmap = runCatching {
+                        BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options)
+                    }.getOrNull() ?: return@collect
 
-                    // Render HANYA di Main thread — minimal, sesegera mungkin
                     withContext(Dispatchers.Main) {
-                        binding.ivCameraFrame.setImageBitmap(bitmap)
-                        updateFpsCounter(jpegBytes.size)
+                        if (!isDestroyed && !isFinishing && !isAkhiring) {
+                            binding.ivCameraFrame.setImageBitmap(bitmap)
+                            updateFpsCounter(jpegBytes.size)
+                        }
                     }
                 }
                 withContext(Dispatchers.Main) {
-                    showStreamState(StreamState.ERROR("Stream berakhir. Tekan Reconnect."))
+                    if (!isDestroyed && !isFinishing && !isAkhiring)
+                        showStreamStateSafe(StreamState.ERROR("Stream berakhir."))
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    showStreamState(StreamState.ERROR("Error: ${e.message}"))
+                    if (!isDestroyed && !isFinishing && !isAkhiring)
+                        showStreamStateSafe(StreamState.ERROR("Error: ${e.message}"))
                 }
             }
         }
     }
 
     private fun updateFpsCounter(frameBytes: Int) {
+        if (isDestroyed || isFinishing) return
         frameCount++
         val now     = System.currentTimeMillis()
         val elapsed = now - fpsWindowStart
-
         if (elapsed >= 1000) {
-            val fps = frameCount * 1000f / elapsed
-            val kb  = frameBytes / 1024
-            binding.tvStreamStatus.text = "%.1f FPS  •  %d KB/frame".format(fps, kb)
+            runCatching {
+                binding.tvStreamStatus.text =
+                    "%.1f FPS  •  %d KB/frame".format(frameCount * 1000f / elapsed, frameBytes / 1024)
+            }
             frameCount     = 0
             fpsWindowStart = now
         }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Session reset
+    // Akhiri Proses
     // ──────────────────────────────────────────────────────────────────────────
+
+    private fun konfirmasiAkhiriProses() {
+        if (isDestroyed || isFinishing || isAkhiring) return
+        AlertDialog.Builder(this)
+            .setTitle("Akhiri Proses")
+            .setMessage("Yakin ingin menghentikan streaming dan menutup aplikasi?\n\nSaat dibuka kembali, aplikasi akan otomatis terhubung ke ESP32-S3.")
+            .setPositiveButton("Akhiri") { _, _ -> akhiriProses() }
+            .setNegativeButton("Batal", null)
+            .show()
+    }
 
     /**
-     * Hapus sesi tersimpan dan kembali ke MainActivity (scan BLE).
-     * Gunakan ini hanya jika ESP32 perlu dikonfigurasi ulang.
+     * Akhiri proses:
+     * 1. Hentikan service (WebSocket, notifikasi)
+     * 2. IP TETAP tersimpan → buka app lagi langsung ke kamera
+     * 3. finishAffinity() → tutup SEMUA activity (keluar dari app)
+     *
+     * Saat app dibuka lagi → MainActivity cek IP → langsung ke CameraStreamActivity.
      */
-    @Suppress("unused")
-    private fun clearSessionAndGoHome() {
-        sessionManager.clearSession()
-        stopService(Intent(this, CameraStreamService::class.java))
-        startActivity(
-            Intent(this, com.example.phase4_camera_eps_s3_mobile.MainActivity::class.java)
-                .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
-        )
-        finish()
-    }
+    private fun akhiriProses() {
+        if (isAkhiring) return
+        isAkhiring = true
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Badge helpers
-    // ──────────────────────────────────────────────────────────────────────────
+        cancelAllJobs()
 
-    private fun showBadge() {
-        binding.tvConnectedBadge.visibility = View.VISIBLE
-    }
+        // Unbind dulu
+        if (isBound) {
+            runCatching { unbindService(serviceConnection) }
+            isBound       = false
+            streamService = null
+        }
 
-    private fun hideBadge() {
-        binding.tvConnectedBadge.visibility = View.GONE
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // Stream state UI
-    // ──────────────────────────────────────────────────────────────────────────
-
-    private fun showStreamState(state: StreamState) {
-        when (state) {
-            StreamState.CONNECTING -> {
-                binding.progressStream.visibility = View.VISIBLE
-                binding.tvStreamStatus.text       = "Menghubungkan ke kamera..."
-                binding.btnReconnect.visibility   = View.GONE
-                binding.tvError.visibility        = View.GONE
-            }
-            StreamState.STREAMING -> {
-                binding.progressStream.visibility = View.GONE
-                binding.tvError.visibility        = View.GONE
-                binding.btnReconnect.visibility   = View.GONE
-            }
-            is StreamState.ERROR -> {
-                binding.progressStream.visibility = View.GONE
-                binding.tvError.text              = state.message
-                binding.tvError.visibility        = View.VISIBLE
-                binding.btnReconnect.visibility   = View.VISIBLE
-                binding.tvStreamStatus.text       = "Offline"
-                hideBadge()
+        // Kirim ACTION_STOP ke service: stop WS, hapus notifikasi, stopSelf()
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(CameraStreamService.createStopIntent(this))
+            } else {
+                startService(CameraStreamService.createStopIntent(this))
             }
         }
+
+        // TIDAK hapus savedIp → buka app lagi otomatis ke kamera
+        Toast.makeText(this, "Aplikasi dihentikan. Buka kembali untuk terhubung.", Toast.LENGTH_SHORT).show()
+
+        // finishAffinity(): tutup SEMUA activity di stack (keluar app)
+        finishAffinity()
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // UI helpers
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private fun showBadgeSafe() {
+        if (isDestroyed || isFinishing) return
+        badgeSwipeRevealed = false
+        runCatching {
+            binding.btnAkhiriBadge.visibility   = View.GONE
+            binding.tvConnectedBadge.text       = "● Menerima data dari ESP32-S3  ‹ geser"
+            binding.tvConnectedBadge.visibility = View.VISIBLE
+        }
+    }
+
+    private fun hideBadgeSafe() {
+        if (isDestroyed || isFinishing) return
+        badgeSwipeRevealed = false
+        runCatching {
+            binding.btnAkhiriBadge.visibility   = View.GONE
+            binding.tvConnectedBadge.visibility = View.GONE
+        }
+    }
+
+    private fun showStreamStateSafe(state: StreamState) {
+        if (isDestroyed || isFinishing) return
+        runCatching {
+            when (state) {
+                StreamState.CONNECTING -> {
+                    binding.progressStream.visibility = View.VISIBLE
+                    binding.tvStreamStatus.text       = "Menghubungkan ke kamera ESP32..."
+                    binding.btnReconnect.visibility   = View.GONE
+                    binding.tvError.visibility        = View.GONE
+                }
+                StreamState.STREAMING -> {
+                    binding.progressStream.visibility = View.GONE
+                    binding.tvError.visibility        = View.GONE
+                    binding.btnReconnect.visibility   = View.GONE
+                }
+                is StreamState.ERROR -> {
+                    binding.progressStream.visibility = View.GONE
+                    binding.tvError.text              = state.message
+                    binding.tvError.visibility        = View.VISIBLE
+                    binding.btnReconnect.visibility   = View.VISIBLE
+                    binding.tvStreamStatus.text       = "Offline — menunggu ESP32..."
+                    hideBadgeSafe()
+                }
+            }
+        }
+    }
+
+    private fun cancelAllJobs() {
+        runCatching { frameCollectJob?.cancel() }; frameCollectJob = null
+        runCatching { stateCollectJob?.cancel() }; stateCollectJob = null
     }
 
     private var isFullscreen = false
     private fun toggleFullscreen() {
         isFullscreen = !isFullscreen
-        supportActionBar?.let {
-            if (isFullscreen) it.hide() else it.show()
-        }
+        if (isFullscreen) supportActionBar?.hide() else supportActionBar?.show()
     }
 
     private sealed class StreamState {

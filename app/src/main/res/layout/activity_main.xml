@@ -5,21 +5,21 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:padding="16dp"
-    tools:context=".ui.MainActivity">
+    tools:context=".MainActivity">
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="ESP32 WiFi Config"
+        android:text="ESP32-S3 Camera"
         android:textSize="24sp"
         android:textStyle="bold"
         android:textAlignment="center"
-        android:layout_marginBottom="8dp" />
+        android:layout_marginBottom="4dp" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Scan and connect to ESP32 devices"
+        android:text="Scan dan sambungkan perangkat ESP32"
         android:textAlignment="center"
         android:textColor="#666666"
         android:layout_marginBottom="16dp" />
@@ -29,23 +29,56 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Scan ESP32"
-        android:layout_marginBottom="16dp" />
+        android:layout_marginBottom="8dp" />
 
     <ProgressBar
         android:id="@+id/progressBar"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
+        android:layout_marginBottom="8dp"
         android:visibility="gone" />
+
+    <!--
+        Banner: ditampilkan saat ESP32 terakhir ditemukan di BLE scan.
+        User harus tap "Sambungkan ke Kamera" — tidak ada auto-navigate.
+    -->
+    <LinearLayout
+        android:id="@+id/layoutBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#E8F5E9"
+        android:padding="12dp"
+        android:layout_marginBottom="8dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvBannerMessage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="✅ ESP32 terakhir ditemukan!"
+            android:textColor="#2E7D32"
+            android:textSize="14sp"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btnConnectCamera"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Sambungkan ke Kamera"
+            android:backgroundTint="#2E7D32"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/tvEmpty"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="No devices found.\nMake sure ESP32 is powered on and in BLE mode."
+        android:text="Tidak ada perangkat ESP32 yang ditemukan.\nPastikan ESP32 menyala dan dalam mode BLE."
         android:textAlignment="center"
         android:textColor="#999999"
-        android:layout_marginTop="32dp"
+        android:layout_marginTop="16dp"
         android:visibility="visible" />
 
     <androidx.recyclerview.widget.RecyclerView

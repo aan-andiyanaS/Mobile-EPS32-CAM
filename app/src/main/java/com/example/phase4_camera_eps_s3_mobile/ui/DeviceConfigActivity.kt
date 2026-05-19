@@ -211,6 +211,10 @@ private fun observeState() {
                     // Simpan IP ke SharedPreferences agar saat app dibuka ulang
                     // tidak perlu scan BLE lagi
                     sessionManager.saveEsp32Ip(ip)
+                    // Simpan juga MAC address untuk BLE auto-reconnect di masa depan
+                    if (deviceAddress.isNotEmpty()) {
+                        sessionManager.saveLastDeviceMac(deviceAddress)
+                    }
                     updateCameraButtonVisibility()
                 }
             }

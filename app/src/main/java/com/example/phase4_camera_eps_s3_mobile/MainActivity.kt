@@ -20,48 +20,55 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.phase4_camera_eps_s3_mobile.ble.BleManager
 import com.example.phase4_camera_eps_s3_mobile.databinding.ActivityMainBinding
 import com.example.phase4_camera_eps_s3_mobile.databinding.ItemDeviceBinding
+import com.example.phase4_camera_eps_s3_mobile.ui.CameraStreamActivity
 import com.example.phase4_camera_eps_s3_mobile.ui.DeviceConfigActivity
+import com.example.phase4_camera_eps_s3_mobile.util.SessionManager
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import com.example.phase4_camera_eps_s3_mobile.ui.CameraStreamActivity
-import com.example.phase4_camera_eps_s3_mobile.util.SessionManager
 
 /**
- * MainActivity - BLE Scanner screen
- * Menampilkan list ESP32 devices yang ditemukan
+ * MainActivity — BLE Scanner / Landing screen
+ *
+ * Flow:
+ *  1. Jika ada IP tersimpan (sesi aktif) → langsung ke CameraStreamActivity.
+ *     Ini terjadi setelah provisioning pertama, dan TETAP terjadi setelah "Akhiri"
+ *     (karena "Akhiri" tidak menghapus IP).
+ *
+ *  2. Jika tidak ada IP (pertama kali / setelah reset) → tampil BLE scan untuk provisioning.
+ *
+ * Halaman ini HANYA muncul saat belum ada perangkat ESP32 yang pernah dikonfigurasi.
  */
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityMainBinding
-    private lateinit var bleManager: BleManager
-    private lateinit var deviceAdapter: DeviceAdapter
+    private lateinit var binding:        ActivityMainBinding
     private lateinit var sessionManager: SessionManager
+    // bleManager hanya diinit jika perlu BLE scan (tidak ada IP tersimpan)
+    private var bleManager: BleManager? = null
+    private var deviceAdapter: DeviceAdapter? = null
 
-    // Permission launcher: dipanggil setelah user menjawab dialog permission
+    private val stopScanRunnable = Runnable {
+        bleManager?.takeIf { it.isScanning.value }?.stopScan()
+    }
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val allGranted = permissions.all { it.value }
-        if (allGranted) {
-            // Permission baru saja di-grant — sekarang cek apakah BT perlu di-enable
-            if (!bleManager.isBluetoothEnabled()) {
+        if (permissions.all { it.value }) {
+            if (bleManager?.isBluetoothEnabled() == false) {
                 @Suppress("DEPRECATION")
                 bluetoothEnableLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
             } else {
                 startScan()
             }
         } else {
-            Toast.makeText(this, "Bluetooth permissions required", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Izin Bluetooth diperlukan untuk scan perangkat", Toast.LENGTH_SHORT).show()
         }
     }
 
-    // Bluetooth enable launcher
     private val bluetoothEnableLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            checkPermissionsAndScan()
-        }
+        if (result.resultCode == RESULT_OK) checkPermissionsAndScan()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,66 +78,70 @@ class MainActivity : AppCompatActivity() {
 
         sessionManager = SessionManager(this)
 
-        // Jika ESP32 sudah pernah dikonfigurasi dan IP tersimpan,
-        // langsung buka CameraStreamActivity — bypass scan BLE.
+        // ── Prioritas 1: Ada IP tersimpan → langsung ke kamera ─────────────
         val savedIp = sessionManager.getSavedEsp32Ip()
         if (savedIp != null) {
             startActivity(CameraStreamActivity.createIntent(this, savedIp))
-            finish() // Tutup MainActivity agar user tidak bisa back ke sini
-            return
+            finish()
+            return  // bleManager TIDAK diinit di sini
         }
 
+        // ── Prioritas 2: Tidak ada IP → perlu provisioning via BLE ─────────
         bleManager = BleManager(this)
-        setupRecyclerView()
-        setupClickListeners()
-        observeState()
-    }
-
-    private fun setupRecyclerView() {
-        deviceAdapter = DeviceAdapter { scanResult ->
-            val intent = Intent(this, DeviceConfigActivity::class.java).apply {
-                putExtra("device_name", scanResult.device.name ?: "Unknown")
+        val adapter = DeviceAdapter { scanResult ->
+            startActivity(Intent(this, DeviceConfigActivity::class.java).apply {
+                putExtra("device_name",    scanResult.device.name ?: "Unknown")
                 putExtra("device_address", scanResult.device.address)
-            }
-            startActivity(intent)
+            })
         }
+        deviceAdapter = adapter
 
         binding.recyclerDevices.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = deviceAdapter
+            this.adapter  = adapter
         }
+
+        // Sembunyikan elemen banner (tidak digunakan)
+        binding.layoutBanner.visibility = View.GONE
+
+        setupClickListeners()
+        observeState()
+
+        // Mulai scan otomatis saat halaman pertama dibuka
+        checkBluetoothAndScan()
     }
 
     private fun setupClickListeners() {
         binding.btnScan.setOnClickListener {
-            if (bleManager.isScanning.value) {
-                bleManager.stopScan()
-            } else {
-                checkBluetoothAndScan()
-            }
+            val bm = bleManager ?: return@setOnClickListener
+            if (bm.isScanning.value) bm.stopScan()
+            else checkBluetoothAndScan()
         }
     }
 
     private fun observeState() {
+        val bm = bleManager ?: return
+
         lifecycleScope.launch {
-            bleManager.isScanning.collectLatest { isScanning ->
-                binding.btnScan.text = if (isScanning) "Stop Scan" else "Scan ESP32"
+            bm.isScanning.collectLatest { isScanning ->
+                binding.btnScan.text           = if (isScanning) "Stop Scan" else "Scan ESP32"
                 binding.progressBar.visibility = if (isScanning) View.VISIBLE else View.GONE
             }
         }
 
         lifecycleScope.launch {
-            bleManager.scanResults.collectLatest { results ->
-                deviceAdapter.submitList(results)
+            bm.scanResults.collectLatest { results ->
+                deviceAdapter?.submitList(results)
                 binding.tvEmpty.visibility = if (results.isEmpty()) View.VISIBLE else View.GONE
+                if (results.isEmpty()) {
+                    binding.tvEmpty.text = "Tidak ada perangkat ESP32 ditemukan.\nPastikan ESP32 menyala dan dalam mode BLE."
+                }
             }
         }
     }
 
     private fun checkBluetoothAndScan() {
-        // FIX: Di Android 12+ (API 31+), BLUETOOTH_CONNECT wajib di-grant sebelum
-        // meluncurkan ACTION_REQUEST_ENABLE. Jika belum granted, minta permission dulu.
-        // Setelah granted, permissionLauncher callback akan handle enable BT & scan.
+        val bm = bleManager ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
                 != PackageManager.PERMISSION_GRANTED
@@ -141,8 +152,7 @@ class MainActivity : AppCompatActivity() {
             ))
             return
         }
-
-        if (!bleManager.isBluetoothEnabled()) {
+        if (!bm.isBluetoothEnabled()) {
             @Suppress("DEPRECATION")
             bluetoothEnableLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
         } else {
@@ -152,46 +162,31 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkPermissionsAndScan() {
         val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT
-            )
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         } else {
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION
-            )
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-
         val notGranted = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-
-        if (notGranted.isEmpty()) {
-            startScan()
-        } else {
-            permissionLauncher.launch(notGranted.toTypedArray())
-        }
+        if (notGranted.isEmpty()) startScan()
+        else permissionLauncher.launch(notGranted.toTypedArray())
     }
 
     private fun startScan() {
-        bleManager.startScan()
-
-        // Auto stop after 10 seconds
-        binding.root.postDelayed({
-            if (bleManager.isScanning.value) {
-                bleManager.stopScan()
-            }
-        }, 10000)
+        bleManager?.startScan()
+        binding.root.removeCallbacks(stopScanRunnable)
+        binding.root.postDelayed(stopScanRunnable, 15_000)  // auto-stop 15 detik
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        bleManager.close()
+        binding.root.removeCallbacks(stopScanRunnable)
+        bleManager?.close()  // null-safe karena var nullable
     }
 
-    /**
-     * Adapter for device list
-     */
+    // ── Adapter ──────────────────────────────────────────────────────────────
+
     inner class DeviceAdapter(
         private val onClick: (ScanResult) -> Unit
     ) : RecyclerView.Adapter<DeviceAdapter.ViewHolder>() {
@@ -203,31 +198,18 @@ class MainActivity : AppCompatActivity() {
             notifyDataSetChanged()
         }
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            val binding = ItemDeviceBinding.inflate(
-                LayoutInflater.from(parent.context), parent, false
-            )
-            return ViewHolder(binding)
-        }
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder =
+            ViewHolder(ItemDeviceBinding.inflate(LayoutInflater.from(parent.context), parent, false))
 
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            holder.bind(items[position])
-        }
-
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) = holder.bind(items[position])
         override fun getItemCount() = items.size
 
-        inner class ViewHolder(
-            private val binding: ItemDeviceBinding
-        ) : RecyclerView.ViewHolder(binding.root) {
-
-            fun bind(scanResult: ScanResult) {
-                binding.tvDeviceName.text = scanResult.device.name ?: "Unknown Device"
-                binding.tvDeviceAddress.text = scanResult.device.address
-                binding.tvRssi.text = "${scanResult.rssi} dBm"
-
-                binding.root.setOnClickListener {
-                    onClick(scanResult)
-                }
+        inner class ViewHolder(private val b: ItemDeviceBinding) : RecyclerView.ViewHolder(b.root) {
+            fun bind(sr: ScanResult) {
+                b.tvDeviceName.text    = sr.device.name ?: "Unknown Device"
+                b.tvDeviceAddress.text = sr.device.address
+                b.tvRssi.text          = "${sr.rssi} dBm"
+                b.root.setOnClickListener { onClick(sr) }
             }
         }
     }

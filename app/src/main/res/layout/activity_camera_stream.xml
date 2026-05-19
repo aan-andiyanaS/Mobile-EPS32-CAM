@@ -49,32 +49,74 @@
             android:layout_marginTop="8dp"
             android:visibility="gone" />
 
-        <Button
-            android:id="@+id/btnReconnect"
+        <!-- Baris tombol: Reconnect + Akhiri -->
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:text="Reconnect"
-            android:layout_marginTop="8dp"
-            android:visibility="gone" />
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/btnReconnect"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Reconnect"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/btnAkhiri"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="Akhiri"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#D32F2F" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
-    <!-- Badge koneksi: muncul di pojok kanan atas saat WebSocket berhasil terbuka -->
-    <TextView
-        android:id="@+id/tvConnectedBadge"
+    <!-- Badge koneksi + Tombol Akhiri tersembunyi (geser untuk tampilkan)
+         Container ini bisa digeser ke kiri untuk memunculkan btnAkhiriBadge -->
+    <FrameLayout
+        android:id="@+id/badgeSwipeContainer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
-        android:layout_margin="12dp"
-        android:paddingLeft="10dp"
-        android:paddingRight="10dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
-        android:text="&#9679; Menerima data dari ESP32-S3"
-        android:textColor="#FFFFFF"
-        android:textSize="11sp"
-        android:background="@drawable/badge_connected_bg"
-        android:visibility="gone" />
+        android:layout_margin="12dp">
+
+        <!-- Tombol Akhiri (tersembunyi di balik badge, muncul saat digeser) -->
+        <Button
+            android:id="@+id/btnAkhiriBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical|end"
+            android:text="Akhiri"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:backgroundTint="#D32F2F"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone" />
+
+        <!-- Badge koneksi utama -->
+        <TextView
+            android:id="@+id/tvConnectedBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:text="&#9679; Menerima data dari ESP32-S3  ‹ geser"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:background="@drawable/badge_connected_bg"
+            android:visibility="gone" />
+
+    </FrameLayout>
 
 </FrameLayout>

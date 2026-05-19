@@ -98,11 +98,15 @@
 #define FRAME_HEADER_SZ  9     // 1B type + 8B timestamp_us (little-endian)
 
 // ======== TUNING ========
-static constexpr uint8_t  JPEG_QUALITY     = 15;      // 0=best, 63=worst (15 = balance kualitas/ukuran)
-static constexpr uint32_t TARGET_FRAME_US  = 66666;   // ~15 FPS target
-static constexpr uint32_t WS_PING_INTERVAL = 10000;   // ms — heartbeat setiap 10 detik
-static constexpr size_t   WS_BUF_MAX       = 130*1024; // 130 KB maks ukuran frame JPEG+header
-static constexpr uint32_t HEAP_GUARD_BYTES = 30000;   // lewati frame jika heap < 30 KB
+static constexpr uint8_t  JPEG_QUALITY      = 15;      // 0=best, 63=worst
+static constexpr uint32_t TARGET_FRAME_US   = 66666;   // ~15 FPS
+static constexpr uint32_t WS_PING_INTERVAL  = 10000;   // ms — heartbeat setiap 10 detik
+static constexpr size_t   WS_BUF_MAX        = 130*1024;
+static constexpr uint32_t HEAP_GUARD_BYTES  = 30000;
+
+// Mode hemat daya: jika tidak ada client selama X ms, skip capture frame
+// Kamera tetap init (reinit mahal), hanya frame tidak dikirim
+static constexpr uint32_t POWER_SAVE_TIMEOUT = 30000;  // 30 detik tanpa client → hemat daya
 
 // ======== GLOBAL STATE ========
 Adafruit_NeoPixel rgbLed(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -124,6 +128,11 @@ bool oldDeviceConnected = false;
 // WiFi
 bool   wifiConnected = false;
 String deviceIP      = "";
+unsigned long wifiDisconnectTime = 0;
+bool          isWifiDisconnected   = false;
+bool          isCameraActive       = true;
+String        currentSSID          = "";
+String        currentPassword      = "";
 
 // BLE command flags
 bool   shouldScanWifi    = false;
@@ -142,6 +151,11 @@ uint8_t       resetLedPhase        = 0;
 // Buffer WebSocket pre-allocated di PSRAM — hindari malloc/free per frame
 static uint8_t* g_wsBuf     = nullptr;
 static size_t   g_wsBufSize = 0;
+
+// Mode hemat daya
+static bool     powerSaveMode       = false;    // true = tidak ada client, skip capture
+static uint32_t lastClientLostTime  = 0;        // kapan client terakhir disconnect
+static bool     hadClientBefore     = false;    // pernah ada client (untuk trigger power save)
 
 // ======== LED HELPERS ========
 void setLedColor(uint8_t r, uint8_t g, uint8_t b) {
@@ -248,22 +262,32 @@ void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
         case WS_EVT_CONNECT:
             Serial.printf("[WS] Client #%u connected from %s\n",
                           client->id(), client->remoteIP().toString().c_str());
-            // KRITIKAL untuk low-latency: nonaktifkan TCP Nagle Algorithm.
-            // Nagle menahan pengiriman packet kecil hingga buffer penuh atau ACK diterima,
-            // menyebabkan delay hingga 200ms pada real-time streaming.
             client->client()->setNoDelay(true);
             wsClientConnected = true;
+            hadClientBefore   = true;
+            // Keluar dari power save mode saat client baru connect
+            if (powerSaveMode) {
+                powerSaveMode = false;
+                Serial.println("[PWR] Client terhubung — keluar dari mode hemat daya");
+                ledGreen();
+            }
             break;
         case WS_EVT_DISCONNECT:
             Serial.printf("[WS] Client #%u disconnected\n", client->id());
+            // Cek apakah masih ada client lain
             wsClientConnected = (ws.count() > 1);
+            if (!wsClientConnected && hadClientBefore) {
+                // Semua client disconnect — catat waktu untuk timer power save
+                lastClientLostTime = millis();
+                Serial.printf("[PWR] Semua client disconnect — power save dalam %d detik\n",
+                              POWER_SAVE_TIMEOUT / 1000);
+            }
             break;
         case WS_EVT_ERROR:
             Serial.printf("[WS] Error client #%u\n", client->id());
             break;
         case WS_EVT_DATA: {
             AwsFrameInfo* info = (AwsFrameInfo*)arg;
-            // 0xA1 = set JPEG quality
             if (info->opcode == WS_BINARY && len >= 2 && data[0] == 0xA1) {
                 sensor_t* s = esp_camera_sensor_get();
                 if (s) s->set_quality(s, data[1]);
@@ -277,9 +301,11 @@ void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
 
 // ======== CAPTURE & SEND via WebSocket ========
 void captureAndSend() {
-    if (ws.count() == 0) return;
+    // Skip jika kamera dinonaktifkan sementara
+    if (!isCameraActive) return;
+    // Skip jika tidak ada client atau dalam mode hemat daya
+    if (ws.count() == 0 || powerSaveMode) return;
 
-    // Heap guard: lewati frame jika memori heap kritis
     if (esp_get_free_heap_size() < HEAP_GUARD_BYTES) {
         Serial.printf("[MEM] Heap kritis (%u B) — frame dilewati\n", esp_get_free_heap_size());
         return;
@@ -302,18 +328,12 @@ void captureAndSend() {
     const size_t   total = FRAME_HEADER_SZ + jpg_len;
     const uint64_t ts_us = esp_timer_get_time();
 
-    // Alokasi PSRAM buffer — hanya jika belum ada atau ukuran berubah
-    // Ini menghindari malloc/free per frame yang menyebabkan fragmentasi heap.
     if (!g_wsBuf || total > g_wsBufSize) {
         if (g_wsBuf) heap_caps_free(g_wsBuf);
-        // Coba PSRAM dulu, fallback ke DRAM
         g_wsBuf = (uint8_t*)heap_caps_malloc(
-            total + 8192,
-            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+            total + 8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
         );
-        if (!g_wsBuf) {
-            g_wsBuf = (uint8_t*)malloc(total + 4096);
-        }
+        if (!g_wsBuf) g_wsBuf = (uint8_t*)malloc(total + 4096);
         g_wsBufSize = g_wsBuf ? total + 8192 : 0;
         if (!g_wsBuf) {
             if (fb)             esp_camera_fb_return(fb);
@@ -322,17 +342,13 @@ void captureAndSend() {
         }
     }
 
-    // Build frame header
     g_wsBuf[0] = FRAME_TYPE_JPEG;
     memcpy(g_wsBuf + 1, &ts_us, 8);
     memcpy(g_wsBuf + FRAME_HEADER_SZ, jpg_buf, jpg_len);
 
-    // Return frame buffer SESEGERA MUNGKIN sebelum send
-    // Mengurangi waktu tahan kamera sehingga frame berikutnya bisa diambil lebih cepat.
     if (fb)             esp_camera_fb_return(fb);
     else if (converted) free(jpg_buf);
 
-    // Kirim ke semua client WebSocket yang terhubung
     ws.binaryAll(g_wsBuf, total);
 }
 
@@ -373,6 +389,18 @@ bool connectToWifi(const String& ssid, const String& pass) {
 
         deviceIP     = WiFi.localIP().toString();
         wifiConnected = true;
+        currentSSID   = ssid;
+        currentPassword = pass;
+        isWifiDisconnected = false;
+
+        // Aktifkan kembali kamera jika sebelumnya sempat mati
+        if (!isCameraActive) {
+            Serial.println("[CAM] Re-initializing camera on successful connection...");
+            if (initCamera()) {
+                isCameraActive = true;
+            }
+        }
+
         Serial.printf("[WiFi] Connected! IP: %s\n", deviceIP.c_str());
         Serial.printf("[WiFi] RSSI: %d dBm | Power saving: OFF\n", WiFi.RSSI());
         return true;
@@ -675,6 +703,17 @@ void loop() {
                 shouldConnectWifi = false;
                 pendingSSID       = "";
                 pendingPassword   = "";
+                currentSSID       = "";
+                currentPassword   = "";
+                isWifiDisconnected = false;
+
+                // Aktifkan kembali kamera jika sebelumnya sempat mati sebelum masuk mode BLE provisioning
+                if (!isCameraActive) {
+                    Serial.println("[RESET] Re-initializing camera for BLE provisioning mode...");
+                    if (initCamera()) {
+                        isCameraActive = true;
+                    }
+                }
 
                 // 6. Init ulang BLE dari kondisi bersih
                 Serial.println("[BLE] Re-initializing BLE...");
@@ -741,42 +780,90 @@ void loop() {
         static uint32_t lastHbeat     = 0;
         static uint32_t framesSent    = 0;
         uint64_t nowUs = esp_timer_get_time();
+        uint32_t nowMs = millis();
 
-        // Capture & kirim frame sesuai target FPS
+        // ── Power Save Mode: cek timeout jika tidak ada client ────────────
+        if (!powerSaveMode && hadClientBefore && !wsClientConnected &&
+            lastClientLostTime > 0 &&
+            (nowMs - lastClientLostTime >= POWER_SAVE_TIMEOUT)) {
+            powerSaveMode = true;
+            Serial.println("[PWR] Masuk mode hemat daya — kamera tidak aktif");
+            // LED berkedip merah pelan untuk indikasi power save
+        }
+
+        // LED indikator power save: berkedip merah pelan
+        if (powerSaveMode) {
+            static uint32_t lastPwrLed = 0;
+            static bool     pwrLedOn   = false;
+            if (nowMs - lastPwrLed >= 1500) {  // berkedip setiap 1.5 detik
+                lastPwrLed = nowMs;
+                pwrLedOn   = !pwrLedOn;
+                if (pwrLedOn) ledRed(); else ledOff();
+            }
+        }
+
+        // Capture & kirim frame (dilewati jika powerSaveMode atau tidak ada client)
         if (nowUs - lastFrameUs >= TARGET_FRAME_US) {
             lastFrameUs = nowUs;
             captureAndSend();
-            framesSent++;
+            if (!powerSaveMode && wsClientConnected) framesSent++;
         }
 
-        // Bersihkan koneksi WS yang sudah mati — SETIAP 2 DETIK, bukan setiap loop.
-        // cleanupClients() setiap loop dapat menutup koneksi aktif secara prematur.
-        uint32_t nowMs = millis();
+        // Bersihkan koneksi WS mati setiap 2 detik
         if (nowMs - lastCleanup >= 2000) {
             lastCleanup = nowMs;
             ws.cleanupClients();
         }
 
-        // Heartbeat + WiFi watchdog setiap WS_PING_INTERVAL
+        // ── WiFi Reconnection & Camera Management ────────────────────────
+        static uint32_t lastWifiCheck = 0;
+        if (nowMs - lastWifiCheck >= 1000) { // Cek status WiFi setiap 1 detik
+            lastWifiCheck = nowMs;
+            if (WiFi.status() != WL_CONNECTED) {
+                if (!isWifiDisconnected) {
+                    isWifiDisconnected = true;
+                    wifiDisconnectTime = nowMs;
+                    Serial.println("[WiFi] Koneksi WiFi terputus! Mencoba menyambung kembali...");
+                    WiFi.disconnect();
+                    WiFi.begin(currentSSID.c_str(), currentPassword.c_str());
+                } else {
+                    unsigned long elapsed = nowMs - wifiDisconnectTime;
+                    if (elapsed > 30000 && isCameraActive) {
+                        Serial.println("[WiFi] Terputus > 30 detik. Menonaktifkan kamera sementara untuk hemat daya...");
+                        esp_camera_deinit();
+                        isCameraActive = false;
+                    }
+                }
+            } else {
+                if (isWifiDisconnected) {
+                    isWifiDisconnected = false;
+                    Serial.println("[WiFi] Koneksi WiFi berhasil tersambung kembali!");
+                    if (!isCameraActive) {
+                        Serial.println("[WiFi] Mengaktifkan kembali kamera...");
+                        if (initCamera()) {
+                            isCameraActive = true;
+                        } else {
+                            Serial.println("[FATAL] Gagal mengaktifkan kembali kamera!");
+                        }
+                    }
+                }
+            }
+        }
+
+        // Heartbeat setiap WS_PING_INTERVAL
         if (nowMs - lastHbeat >= WS_PING_INTERVAL) {
             lastHbeat = nowMs;
 
-            if (WiFi.status() != WL_CONNECTED) {
-                Serial.println("[WiFi] Koneksi WiFi hilang. Restart...");
-                ESP.restart();
-            }
-
             // Log statistik
-            Serial.printf("[STAT] Heap: %u B | PSRAM: %u B | WS clients: %u | FPS ~%.1f\n",
+            Serial.printf("[STAT] Heap: %u B | WS clients: %u | FPS ~%.1f | PowerSave: %s\n",
                 esp_get_free_heap_size(),
-                esp_get_free_internal_heap_size(),
                 ws.count(),
-                (float)framesSent * 1000.0f / WS_PING_INTERVAL);
+                (float)framesSent * 1000.0f / WS_PING_INTERVAL,
+                powerSaveMode ? "ON" : "OFF");
             framesSent = 0;
 
-            // Kirim heartbeat ke semua client
+            // Heartbeat ke client aktif
             if (ws.count() > 0) {
-                // Heartbeat menggunakan header standar agar Android dapat parse
                 uint8_t hbeat[FRAME_HEADER_SZ];
                 const uint64_t ts = esp_timer_get_time();
                 hbeat[0] = FRAME_TYPE_HBEAT;
