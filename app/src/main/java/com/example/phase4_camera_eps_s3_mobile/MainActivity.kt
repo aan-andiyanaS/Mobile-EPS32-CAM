@@ -25,6 +25,12 @@ import com.example.phase4_camera_eps_s3_mobile.ui.DeviceConfigActivity
 import com.example.phase4_camera_eps_s3_mobile.util.SessionManager
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import java.net.InetSocketAddress
+import java.net.Socket
 
 /**
  * MainActivity — BLE Scanner / Landing screen
@@ -42,9 +48,9 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding:        ActivityMainBinding
     private lateinit var sessionManager: SessionManager
-    // bleManager hanya diinit jika perlu BLE scan (tidak ada IP tersimpan)
     private var bleManager: BleManager? = null
     private var deviceAdapter: DeviceAdapter? = null
+    private var autoConnectJob: kotlinx.coroutines.Job? = null
 
     private val stopScanRunnable = Runnable {
         bleManager?.takeIf { it.isScanning.value }?.stopScan()
@@ -78,15 +84,6 @@ class MainActivity : AppCompatActivity() {
 
         sessionManager = SessionManager(this)
 
-        // ── Prioritas 1: Ada IP tersimpan → langsung ke kamera ─────────────
-        val savedIp = sessionManager.getSavedEsp32Ip()
-        if (savedIp != null) {
-            startActivity(CameraStreamActivity.createIntent(this, savedIp))
-            finish()
-            return  // bleManager TIDAK diinit di sini
-        }
-
-        // ── Prioritas 2: Tidak ada IP → perlu provisioning via BLE ─────────
         bleManager = BleManager(this)
         val adapter = DeviceAdapter { scanResult ->
             startActivity(Intent(this, DeviceConfigActivity::class.java).apply {
@@ -101,7 +98,7 @@ class MainActivity : AppCompatActivity() {
             this.adapter  = adapter
         }
 
-        // Sembunyikan elemen banner (tidak digunakan)
+        // Sembunyikan elemen banner (tidak digunakan secara default)
         binding.layoutBanner.visibility = View.GONE
 
         setupClickListeners()
@@ -109,6 +106,12 @@ class MainActivity : AppCompatActivity() {
 
         // Mulai scan otomatis saat halaman pertama dibuka
         checkBluetoothAndScan()
+
+        // Cek IP tersimpan dan mulai background auto-connect check
+        val savedIp = sessionManager.getSavedEsp32Ip()
+        if (savedIp != null) {
+            startAutoConnectCheck(savedIp)
+        }
     }
 
     private fun setupClickListeners() {
@@ -181,8 +184,54 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        autoConnectJob?.cancel()
         binding.root.removeCallbacks(stopScanRunnable)
         bleManager?.close()  // null-safe karena var nullable
+    }
+
+    private fun startAutoConnectCheck(ipAddress: String) {
+        autoConnectJob?.cancel()
+
+        // Tampilkan banner informasi pencarian perangkat tersimpan
+        binding.layoutBanner.visibility = View.VISIBLE
+        binding.tvBannerMessage.text = "Menghubungkan ke perangkat tersimpan ($ipAddress)..."
+        binding.btnConnectCamera.text = "Batal"
+        
+        // Klik Batal untuk membatalkan proses pencarian otomatis
+        binding.btnConnectCamera.setOnClickListener {
+            autoConnectJob?.cancel()
+            binding.layoutBanner.visibility = View.GONE
+            Toast.makeText(this, "Pencarian otomatis dibatalkan.", Toast.LENGTH_SHORT).show()
+        }
+
+        autoConnectJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                var socket: Socket? = null
+                val isOnline = try {
+                    socket = Socket()
+                    socket.connect(InetSocketAddress(ipAddress, 81), 1000)
+                    true
+                } catch (e: Exception) {
+                    false
+                } finally {
+                    runCatching { socket?.close() }
+                }
+
+                if (isOnline) {
+                    withContext(Dispatchers.Main) {
+                        if (!isFinishing && !isDestroyed) {
+                            Toast.makeText(this@MainActivity, "Terhubung ke ESP32 ($ipAddress)", Toast.LENGTH_SHORT).show()
+                            startActivity(CameraStreamActivity.createIntent(this@MainActivity, ipAddress))
+                            finish()
+                        }
+                    }
+                    break
+                }
+
+                // Tunggu 3 detik sebelum mencoba lagi
+                delay(3000)
+            }
+        }
     }
 
     // ── Adapter ──────────────────────────────────────────────────────────────

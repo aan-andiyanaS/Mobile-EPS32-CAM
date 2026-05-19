@@ -65,6 +65,7 @@ class CameraStreamService : Service() {
         private const val NOTIF_CH_ALERT    = "esp32_connected_alert"
         private const val NOTIF_ID_FG       = 1001
         private const val NOTIF_ID_ALERT    = 1002
+        private const val NOTIF_ID_STOPPED  = 1003
         private const val FRAME_TYPE_JPEG   = 0x01.toByte()
         private const val FRAME_HEADER_SZ   = 9
         private const val RECONNECT_BASE_MS = 1_000L
@@ -72,6 +73,7 @@ class CameraStreamService : Service() {
 
         const val EXTRA_IP    = "esp32_ip"
         const val ACTION_STOP = "com.example.phase4_camera_eps_s3_mobile.ACTION_STOP"
+        const val ACTION_EXIT_APP = "com.example.phase4_camera_eps_s3_mobile.ACTION_EXIT_APP"
 
         fun createStartIntent(ctx: Context, ip: String) =
             Intent(ctx, CameraStreamService::class.java).apply { putExtra(EXTRA_IP, ip) }
@@ -121,9 +123,18 @@ class CameraStreamService : Service() {
         if (intent?.action == ACTION_STOP) {
             Log.d(TAG, "ACTION_STOP received")
             stopped = true
+            
+            // Kirim broadcast agar CameraStreamActivity ikut keluar
+            runCatching {
+                sendBroadcast(Intent(ACTION_EXIT_APP).apply {
+                    setPackage(packageName)
+                })
+            }
+
             stopStreamAndRelease()
             cancelAllNotifications()
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            showStoppedNotification(ipAddress)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -336,7 +347,7 @@ class CameraStreamService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             val notif = NotificationCompat.Builder(this, NOTIF_CH_ALERT)
-                .setContentTitle("ESP32-S3 Terkoneksi \uD83D\uDFE2")
+                .setContentTitle("ESP32-S3 Terkoneksi 🟢")
                 .setContentText("Streaming kamera aktif ($ipAddress)")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -345,6 +356,29 @@ class CameraStreamService : Service() {
                 .build()
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
                 .notify(NOTIF_ID_ALERT, notif)
+        }
+    }
+
+    private fun showStoppedNotification(ip: String) {
+        if (ip.isEmpty()) return
+        runCatching {
+            val mainIntent = Intent(this, com.example.phase4_camera_eps_s3_mobile.MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this, 2,
+                mainIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notif = NotificationCompat.Builder(this, NOTIF_CH_FG)
+                .setContentTitle("Sesi Kamera Dihentikan")
+                .setContentText("Ketuk untuk terhubung kembali ke kamera ESP32-S3")
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(NOTIF_ID_STOPPED, notif)
         }
     }
 

@@ -75,6 +75,15 @@ class CameraStreamActivity : AppCompatActivity() {
     // Guard: cegah double-execute akhiriProses
     private var isAkhiring = false
 
+    private val exitReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == CameraStreamService.ACTION_EXIT_APP) {
+                android.util.Log.d("CameraStreamActivity", "Received exit broadcast from service, closing app")
+                finishAffinity()
+            }
+        }
+    }
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             if (isDestroyed || isFinishing) return
@@ -130,6 +139,14 @@ class CameraStreamActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Daftarkan receiver untuk keluar aplikasi
+        val filter = android.content.IntentFilter(CameraStreamService.ACTION_EXIT_APP)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(exitReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(exitReceiver, filter)
+        }
+
         if (ipAddress.isEmpty()) return
         val serviceIntent = CameraStreamService.createStartIntent(this, ipAddress)
         startService(serviceIntent)
@@ -138,6 +155,7 @@ class CameraStreamActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        runCatching { unregisterReceiver(exitReceiver) }
         cancelAllJobs()
         if (isBound) {
             runCatching { unbindService(serviceConnection) }
