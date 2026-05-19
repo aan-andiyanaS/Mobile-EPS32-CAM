@@ -102,33 +102,33 @@ graph TB
 flowchart TD
     START([Buka Aplikasi]) --> CHECK{SessionManager:\nIP tersimpan?}
 
-    CHECK -->|Ya| BG_PING["Background Ping TCP port 80\nTampilkan Banner Batal"]
-    CHECK -->|Tidak ada| MAIN["MainActivity\nBLE Scanner"]
+    CHECK -->|Ya| BG_PING[Background Ping TCP port 80<br/>Tampilkan Banner Batal]
+    CHECK -->|Tidak ada| MAIN[MainActivity<br/>BLE Scanner]
     
-    BG_PING -->|Sukses| RESUME["Buka CameraStreamActivity"]
-    BG_PING -->|"Batal/Gagal"| MAIN
+    BG_PING -->|Sukses| RESUME[Buka CameraStreamActivity]
+    BG_PING -->|Batal atau Gagal| MAIN
 
-    MAIN --> PERM{Izin BLE\ndan Lokasi?}
-    PERM -->|Belum| REQ["Request Runtime\nPermissions"]
+    MAIN --> PERM{Izin BLE<br/>dan Lokasi?}
+    PERM -->|Belum| REQ[Request Runtime<br/>Permissions]
     REQ --> PERM
-    PERM -->|Sudah| SCAN["Scan BLE Devices\nCari ESP32-S3"]
+    PERM -->|Sudah| SCAN[Scan BLE Devices<br/>Cari ESP32-S3]
 
-    SCAN --> FOUND{ESP32-S3\nditemukan?}
+    SCAN --> FOUND{ESP32-S3<br/>ditemukan?}
     FOUND -->|Tidak| SCAN
-    FOUND -->|Ya| CONFIG["DeviceConfigActivity\nPilih jaringan WiFi"]
+    FOUND -->|Ya| CONFIG[DeviceConfigActivity<br/>Pilih jaringan WiFi]
 
-    CONFIG --> SEND["Kirim SSID + Password\nke ESP32 via BLE"]
-    SEND --> WAIT{Terima IP\ndari ESP32?}
+    CONFIG --> SEND[Kirim SSID dan Password<br/>ke ESP32 via BLE]
+    SEND --> WAIT{Terima IP<br/>dari ESP32?}
     WAIT -->|ERROR| CONFIG
-    WAIT -->|"IP:x.x.x.x"| SAVE["Simpan IP ke\nSessionManager"]
+    WAIT -->|IP x.x.x.x| SAVE[Simpan IP ke<br/>SessionManager]
 
-    SAVE --> SERVICE["Start CameraStreamService\nForeground Service"]
-    SERVICE --> CAMERA["CameraStreamActivity\nLive Camera View"]
+    SAVE --> SERVICE[Start CameraStreamService<br/>Foreground Service]
+    SERVICE --> CAMERA[CameraStreamActivity<br/>Live Camera View]
     RESUME --> CAMERA
 
-    CAMERA --> BACK{User tekan\nAkhiri?}
-    BACK --> EXIT["Kirim Broadcast ACTION_EXIT_APP\nfinishAffinity()"]
-    EXIT --> NOTIF["Muncul Notifikasi Persisten\nSesi Dihentikan"]
+    CAMERA --> BACK{User tekan<br/>Akhiri?}
+    BACK --> EXIT[Kirim Broadcast ACTION_EXIT_APP<br/>finishAffinity]
+    EXIT --> NOTIF[Muncul Notifikasi Persisten<br/>Sesi Dihentikan]
     
     NOTIF --> REOPEN{Klik Notifikasi?}
     REOPEN -->|Ya| START
