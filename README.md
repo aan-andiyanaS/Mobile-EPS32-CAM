@@ -102,8 +102,11 @@ graph TB
 flowchart TD
     START([Buka Aplikasi]) --> CHECK{SessionManager:\nIP tersimpan?}
 
-    CHECK -- Ya --> RESUME[Langsung buka\nCameraStreamActivity]
+    CHECK -- Ya --> BG_PING[Background Ping TCP port 80\nTampilkan Banner Batal]
     CHECK -- Tidak ada --> MAIN[MainActivity\nBLE Scanner]
+    
+    BG_PING -- Sukses --> RESUME[Buka CameraStreamActivity]
+    BG_PING -- Batal/Gagal --> MAIN
 
     MAIN --> PERM{Izin BLE\ndan Lokasi?}
     PERM -- Belum --> REQ[Request Runtime\nPermissions]
@@ -123,12 +126,12 @@ flowchart TD
     SERVICE --> CAMERA[CameraStreamActivity\nLive Camera View]
     RESUME --> CAMERA
 
-    CAMERA --> BACK{User tekan\nBack?}
-    BACK --> MINIMIZE[moveTaskToBack\nApp minimize]
-    MINIMIZE --> BG[Service tetap jalan\nWebSocket tetap connect]
-
-    BG --> REOPEN{User buka\napp lagi?}
-    REOPEN --> RESUME
+    CAMERA --> BACK{User tekan\nAkhiri?}
+    BACK --> EXIT[Kirim Broadcast ACTION_EXIT_APP\nfinishAffinity()]
+    EXIT --> NOTIF[Muncul Notifikasi Persisten\n'Sesi Dihentikan']
+    
+    NOTIF --> REOPEN{Klik Notifikasi?}
+    REOPEN --> START
 ```
 
 ### Flowchart Background Service
@@ -179,8 +182,8 @@ flowchart LR
 
 ### `MainActivity`
 Entry point aplikasi. Bertanggung jawab untuk:
-- Memeriksa `SessionManager` — jika IP ESP32 sudah tersimpan, langsung redirect ke `CameraStreamActivity` (skip BLE scan)
-- Melakukan scan BLE untuk menemukan ESP32-S3
+- Selalu menampilkan antarmuka BLE Scanner setiap kali aplikasi dibuka.
+- Memeriksa `SessionManager` — jika IP tersimpan, aplikasi akan melakukan *background ping* (TCP Socket ke port 80) sambil menampilkan banner informatif. Jika ESP32 *online*, otomatis beralih ke layar kamera.
 - Menangani runtime permissions: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION`
 - Urutan permission yang benar: request `BLUETOOTH_CONNECT` dulu → enable Bluetooth → scan
 
@@ -207,6 +210,7 @@ Foreground Service yang menjaga koneksi WebSocket tetap hidup. Fitur utama:
 |-------|-------------|--------|
 | **WakeLock** | `PARTIAL_WAKE_LOCK` 12 jam | Cegah CPU sleep saat streaming |
 | **WifiLock** | `WIFI_MODE_FULL_LOW_LATENCY` | Cegah WiFi radio masuk power-saving |
+| **Exit Behavior** | Broadcast `ACTION_EXIT_APP` | Menutup aplikasi secara total & memunculkan notifikasi persisten *Reconnect* |
 | **NetworkCallback** | `ConnectivityManager` | Deteksi perubahan jaringan → trigger reconnect |
 | **Exponential Backoff** | 1s→2s→4s→8s | Reconnect cerdas tanpa flood server |
 | **DROP_OLDEST** | `BufferOverflow.DROP_OLDEST` | Selalu tampilkan frame terbaru, bukan frame lama |

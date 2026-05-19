@@ -1,37 +1,16 @@
-# Issue Report & Fix: Bug Auto-Connect Selalu "Mencari Perangkat"
+# Update Dokumentasi: Siklus Hidup dan Power Save Mode
 
-## Deskripsi Masalah (Bug)
-Setelah fitur auto-connect cerdas di `MainActivity` diimplementasikan, aplikasi terus saja memunculkan pesan *"Mencari perangkat tersimpan..."* dan tidak mau berpindah ke `CameraStreamActivity`, meskipun ESP32 sebenarnya sudah menyala dan terkoneksi ke jaringan WiFi.
+## Deskripsi Tugas
+Melakukan sinkronisasi dokumentasi (`README.md`) utama dan dokumentasi *firmware* ESP32 agar sejalan dengan perubahan logika kode yang baru saja kita implementasikan.
 
-## Analisis Akar Masalah (Root Cause Analysis)
-Bug ini disebabkan oleh **ketidakcocokan port TCP** yang di-ping oleh Android dengan port server WebSocket yang sebenarnya terbuka di ESP32.
-- Pada implementasi awal di `MainActivity.kt`, background ping menggunakan kode `Socket(ipAddress, 81)` dengan asumsi bahwa ESP32 membuka WebSocket di port `81`.
-- Kenyataannya, di firmware `esp32s3_camera_with_mobile.ino`, server diinisialisasi dengan perintah `AsyncWebServer server(80);`.
-- Dan di sisi klien (Android OkHttp), URI yang dipakai adalah `"ws://$ip/ws"`. Jika kita tidak menspesifikasikan port pada URI (misal `:81`), maka secara *default* protokol akan mengarah ke HTTP port `80`.
-- Akibatnya, saat `MainActivity` mencoba melakukan TCP ping ke port `81`, koneksi selalu ditolak (`Connection Refused`), sehingga akan masuk ke blok `catch` dan terus terjebak dalam *loop* "Mencari Perangkat".
+## Rincian Pembaruan
+1. **README.md Utama (Android):**
+   - **Flowchart Utama:** Ditambahkan alur untuk *Background Ping TCP* (port 80) dan alur notifikasi persisten saat *"Sesi Dihentikan"*.
+   - **Tabel Fitur:** Menambahkan informasi tentang *Exit Behavior* (Broadcast `ACTION_EXIT_APP`) pada `CameraStreamService`.
+   - **MainActivity:** Memperjelas bahwa *BLE Scanner* sekarang akan selalu muncul, dan jika ada IP tersimpan, aplikasi akan mengandalkan pengecekan via *socket* alih-alih melakukan *jump* instan.
+2. **README.md Firmware (ESP32):**
+   - **Flowchart Utama:** Menyisipkan kondisi *Power Save Mode* yang akan menangguhkan pembacaan frame JPEG bila tidak ada klien WebSocket yang terkoneksi selama lebih dari 30 detik.
+   - **Tabel Indikator LED:** Menambahkan status "🔴 Merah berkedip pelan" sebagai penanda visual ESP32 masuk ke mode hemat daya.
 
-## Solusi yang Telah Diterapkan (Fix)
-Perbaikannya sangat sederhana. Port tujuan pada pengecekan Socket di `MainActivity.kt` telah diubah dari `81` menjadi `80`.
-
-**Kode Lama (`MainActivity.kt`):**
-```kotlin
-val isOnline = try {
-    socket = Socket()
-    socket.connect(InetSocketAddress(ipAddress, 81), 1000)
-    true
-} ...
-```
-
-**Kode Baru (`MainActivity.kt`):**
-```kotlin
-val isOnline = try {
-    socket = Socket()
-    socket.connect(InetSocketAddress(ipAddress, 80), 1000)
-    true
-} ...
-```
-
-## Catatan untuk Junior Developer
-1. **Pentingnya Memahami Default Port:** Ingatlah bahwa URL berawalan `http://` atau `ws://` secara *default* akan menggunakan port `80`, sedangkan `https://` atau `wss://` menggunakan port `443`.
-2. **Validasi End-to-End:** Selalu lakukan pengecekan ganda (*cross-check*) terhadap variabel konfigurasi jaringan (seperti port, path, dan alamat IP) antara kode backend/firmware dan klien/mobile app.
-3. Tindakan ini sudah dieksekusi secara *live* pada baris kode bersangkutan, Anda bisa me-review *commit* terakhir untuk melihat perubahannya.
+## Status
+Telah dieksekusi secara otomatis dan dokumen ini disubmit sebagai *issue* ke repositori untuk *tracking* arsip pengembangan proyek.

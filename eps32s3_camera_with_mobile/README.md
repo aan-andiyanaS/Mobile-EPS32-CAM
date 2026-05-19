@@ -94,6 +94,11 @@ flowchart TD
 
     F --> Q[LED Hijau\nServer siap di ws://IP/ws]
     Q --> R[Loop: Capture & Stream\n15 FPS via WebSocket]
+    
+    R --> S{Klien Disconnect\n> 30 Detik?}
+    S -- Ya --> T[Power Save Mode\nSuspend Capture & LED Merah Pelan]
+    T --> U{Klien Reconnect?}
+    U -- Ya --> R
 ```
 
 ### Flowchart BLE Provisioning Detail
@@ -305,7 +310,8 @@ Library Manager (`Ctrl+Shift+I`):
 | 🔵 Biru berkedip | Menunggu koneksi BLE dari Android |
 | 🟡 Kuning | Sedang koneksi WiFi |
 | 🟢 Hijau | WiFi terkoneksi, WebSocket aktif |
-| 🔴 Merah berkedip | Error (kamera gagal init, dll) |
+| 🔴 Merah berkedip cepat | Error (kamera gagal init, dll) |
+| 🔴 Merah berkedip pelan | **Power Save Mode** (Klien disconnect > 30s, capture ditangguhkan) |
 | 🟣 Magenta | Proses reset credential |
 | ⚪ Putih blink | Konfirmasi reset berhasil |
 
