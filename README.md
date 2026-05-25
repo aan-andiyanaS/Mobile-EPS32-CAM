@@ -1,6 +1,6 @@
-# Phase 4 — Android Camera Stream App (ESP32-S3)
+# VNetra Phase 4 — Sistem Kamera Nirkabel ESP32-S3 + Android
 
-> **Bagian dari sistem**: Aplikasi Android ini adalah **sisi klien** yang bekerja bersama firmware ESP32-S3 ([eps32s3_camera_with_mobile.ino](../phase3-transfer-camera-to-smarphone-via-wifi/esp32/eps32s3_camera_with_mobile/README.md)) untuk membentuk sistem kamera nirkabel real-time.
+> **Gambaran Proyek**: Sistem kamera nirkabel real-time yang menggabungkan firmware ESP32-S3 ([`eps32s3_camera_with_mobile/`](eps32s3_camera_with_mobile/README.md)) sebagai server kamera dengan aplikasi Android sebagai klien tampilan live.
 
 ---
 
@@ -33,7 +33,7 @@
 │  │                 │   JPEG      │  5. Tampilkan Live Feed  │ │
 │  └─────────────────┘             └──────────────────────────┘ │
 │                                                                │
-│  [firmware phase3]                        [aplikasi ini]      │
+│  [eps32s3_camera_with_mobile/]            [aplikasi ini]      │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -111,7 +111,7 @@ flowchart TD
     MAIN --> PERM{Izin BLE<br/>dan Lokasi?}
     PERM -->|Belum| REQ[Request Runtime<br/>Permissions]
     REQ --> PERM
-    PERM -->|Sudah| SCAN[Scan BLE Devices<br/>Cari ESP32-S3]
+    PERM -->|Sudah| SCAN[Scan BLE Devices<br/>Cari ESP32S3-WiFi-Config]
 
     SCAN --> FOUND{ESP32-S3<br/>ditemukan?}
     FOUND -->|Tidak| SCAN
@@ -119,7 +119,7 @@ flowchart TD
 
     CONFIG --> SEND[Kirim SSID dan Password<br/>ke ESP32 via BLE]
     SEND --> WAIT{Terima IP<br/>dari ESP32?}
-    WAIT -->|ERROR| CONFIG
+    WAIT -->|CONNECT:FAILED| CONFIG
     WAIT -->|IP x.x.x.x| SAVE[Simpan IP ke<br/>SessionManager]
 
     SAVE --> SERVICE[Start CameraStreamService<br/>Foreground Service]
@@ -186,13 +186,15 @@ Entry point aplikasi. Bertanggung jawab untuk:
 - Memeriksa `SessionManager` — jika IP tersimpan, aplikasi akan melakukan *background ping* (TCP Socket ke port 80) sambil menampilkan banner informatif. Jika ESP32 *online*, otomatis beralih ke layar kamera.
 - Menangani runtime permissions: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION`
 - Urutan permission yang benar: request `BLUETOOTH_CONNECT` dulu → enable Bluetooth → scan
+- Mencari device BLE dengan nama `ESP32S3-WiFi-Config`
 
 ### `DeviceConfigActivity`
 Layar konfigurasi WiFi. Bertanggung jawab untuk:
-- Meminta ESP32 untuk scan jaringan WiFi di sekitar via BLE
+- Mengirim command `"SCAN"` ke ESP32 via BLE untuk meminta scan jaringan WiFi
+- Menerima response `"COUNT:n"` lalu `"BATCH:..."` berisi daftar SSID
 - Menampilkan daftar SSID untuk dipilih user
-- Mengirim SSID + password ke ESP32 via BLE Characteristic Write
-- Menerima notifikasi `IP:x.x.x.x` dari ESP32
+- Mengirim `"CONNECT:SSID|password"` ke ESP32 via BLE Characteristic Write
+- Menerima response `"IP:x.x.x.x"` dari ESP32 jika sukses, atau `"CONNECT:FAILED:..."` jika gagal
 - Menyimpan IP ke `SessionManager` dan memulai streaming
 
 ### `CameraStreamActivity`
@@ -273,7 +275,7 @@ Total latensi teoritis end-to-end: **80–150ms** (sebelum optimasi: 700–900ms
 ## Permission yang Dibutuhkan
 
 | Permission | Kegunaan | Kapan diminta |
-|-----------|---------|--------------|
+|-----------|---------|--------------| 
 | `INTERNET` | WebSocket ke ESP32 | Auto (Manifest) |
 | `ACCESS_NETWORK_STATE` | Cek status jaringan | Auto |
 | `BLUETOOTH_SCAN` | Scan BLE devices | Runtime (MainActivity) |
@@ -298,7 +300,7 @@ Total latensi teoritis end-to-end: **80–150ms** (sebelum optimasi: 700–900ms
 
 ### Build via Android Studio
 
-1. Buka folder `phase4-camera-eps-s3-mobile` di Android Studio
+1. Buka folder root proyek `VNetra/` di Android Studio
 2. Tunggu Gradle sync selesai
 3. Pilih device target
 4. Run → **Run 'app'**
@@ -324,7 +326,7 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 ```
 1. Pastikan ESP32-S3 sudah dinyalakan → LED Biru berkedip (siap BLE)
 2. Buka aplikasi Android
-3. Tap "Scan ESP32" → pilih device dari list
+3. Tap "Scan ESP32" → pilih device "ESP32S3-WiFi-Config" dari list
 4. Pilih jaringan WiFi yang sama dengan HP kamu
 5. Masukkan password → Tap "Connect"
 6. Tunggu ESP32 terkoneksi → notifikasi "ESP32-S3 Terkoneksi" muncul
@@ -338,7 +340,7 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 ## Struktur Proyek
 
 ```
-phase4-camera-eps-s3-mobile/
+VNetra/
 ├── app/src/main/
 │   ├── AndroidManifest.xml
 │   ├── java/.../
@@ -359,7 +361,10 @@ phase4-camera-eps-s3-mobile/
 │       │   └── activity_camera_stream.xml
 │       └── drawable/
 │           └── badge_connected_bg.xml
-└── build.gradle
+├── eps32s3_camera_with_mobile/
+│   └── esp32s3_camera_with_mobile/
+│       └── esp32s3_camera_with_mobile.ino  ← ⭐ Firmware ESP32-S3
+└── build.gradle.kts
 ```
 
 ---

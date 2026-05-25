@@ -1,6 +1,6 @@
-# ESP32-S3 Firmware — BLE Provisioning + WebSocket Camera Stream
+# ESP32-S3 CAM — BLE WiFi Provisioning + WebSocket Camera Stream
 
-> **Bagian dari sistem**: Firmware ini adalah **sisi perangkat keras (ESP32-S3)** yang bekerja bersama aplikasi Android ([phase4-camera-eps-s3-mobile](../../../phase4-camera-eps-s3-mobile/README.md)) untuk membentuk sistem kamera nirkabel real-time.
+> **Bagian dari sistem**: Firmware ini adalah **sisi perangkat keras (ESP32-S3)** yang bekerja bersama aplikasi Android ([VNetra Android App](../../../README.md)) untuk membentuk sistem kamera nirkabel real-time.
 
 ---
 
@@ -10,11 +10,15 @@
 - [Hardware yang Digunakan](#hardware-yang-digunakan)
 - [Teknologi & Library](#teknologi--library)
 - [Alur Kerja Sistem](#alur-kerja-sistem)
+- [Protokol BLE Provisioning](#protokol-ble-provisioning)
 - [Protokol WebSocket](#protokol-websocket)
+- [Power Save Mode](#power-save-mode)
+- [WiFi Auto-Reconnect](#wifi-auto-reconnect)
 - [Mekanisme Reset Credential WiFi](#mekanisme-reset-credential-wifi)
 - [Konfigurasi & Optimasi Kamera](#konfigurasi--optimasi-kamera)
 - [Cara Setup Arduino IDE](#cara-setup-arduino-ide)
 - [Pemetaan GPIO](#pemetaan-gpio)
+- [Indikator LED Status](#indikator-led-status)
 
 ---
 
@@ -30,7 +34,7 @@
 │   │  + WS2812    │     WebSocket (Camera)    │           │ │
 │   └──────────────┘         via WiFi          └───────────┘ │
 │                                                             │
-│   [Firmware ini]                         [phase4 Android]  │
+│   [Firmware ini]                         [Android App]     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -70,33 +74,34 @@ ESP32-S3 bertindak sebagai **server kamera embedded** dengan dua mode operasi:
 
 ```mermaid
 flowchart TD
-    A([Boot / Power ON]) --> B{Cek credential<br/>WiFi di NVS?}
+    A([Boot / Power ON]) --> B{Cek credential WiFi\ndi NVS?}
 
     B -->|Ada| C[Auto-connect WiFi]
-    B -->|Tidak ada| D[Init BLE<br/>Mulai advertising]
+    B -->|Tidak ada| D[Init BLE\nAdvertising sebagai\nESP32S3-WiFi-Config]
 
-    C --> E{WiFi berhasil<br/>terkoneksi?}
-    E -->|Ya| F[WiFi.setSleep OFF<br/>Init WebSocket Server]
-    E -->|Tidak, 20 detik timeout| D
+    C --> E{WiFi berhasil\nterkoneksi?}
+    E -->|Ya| F[WiFi.setSleep OFF\nInit WebSocket Server]
+    E -->|Tidak - timeout 20 detik| G1[Hapus credentials NVS\nDisconnect WiFi]
+    G1 --> D
 
-    D --> G[LED Biru berkedip<br/>Tunggu koneksi Android]
-    G --> H{Android scan<br/>& connect via BLE}
-    H --> I[Android kirim list WiFi request]
-    I --> J[ESP32 scan WiFi<br/>Kirim SSID list via BLE]
-    J --> K[User pilih SSID<br/>& kirim password]
-    K --> L[ESP32 simpan ke NVS<br/>Connect WiFi]
+    D --> G[LED Biru berkedip\nTunggu koneksi Android]
+    G --> H{Android scan\ndan connect via BLE}
+    H --> I[Android kirim command SCAN]
+    I --> J[ESP32 scan WiFi\nKirim COUNT dan BATCH via BLE]
+    J --> K[User pilih SSID\ndan kirim CONNECT SSID+password]
+    K --> L[ESP32 simpan ke NVS\nConnect WiFi]
     L --> M{Berhasil?}
-    M -->|Ya| N[Kirim IP ke Android<br/>via BLE: IP x.x.x.x]
-    M -->|Tidak| O[Kirim ERROR via BLE]
-    N --> P[BLE Off<br/>Hemat daya]
+    M -->|Ya| N[Kirim IP:x.x.x.x via BLE\nKirim CONNECT:SUCCESS\nKirim BLE:DISCONNECT]
+    M -->|Tidak| O[Kirim CONNECT:FAILED\nvia BLE]
+    N --> P[BLE Off\nHemat daya]
     P --> F
     O --> G
 
-    F --> Q[LED Hijau<br/>Server siap di ws://IP/ws]
-    Q --> R[Loop: Capture & Stream<br/>15 FPS via WebSocket]
-    
-    R --> S{Klien Disconnect<br/>> 30 Detik?}
-    S -->|Ya| T[Power Save Mode<br/>Suspend Capture & LED Merah Pelan]
+    F --> Q[LED Hijau\nServer siap - ws://IP/ws]
+    Q --> R[Loop: Capture dan Stream\n15 FPS via WebSocket]
+
+    R --> S{Klien Disconnect\nlebih dari 30 Detik?}
+    S -->|Ya| T[Power Save Mode\nSuspend Capture\nLED Merah Pelan]
     T --> U{Klien Reconnect?}
     U -->|Ya| R
 ```
@@ -108,25 +113,47 @@ sequenceDiagram
     participant ESP as ESP32-S3
     participant APP as Android App
 
-    APP->>ESP: BLE Connect
-    ESP->>APP: BLE Connection OK
+    APP->>ESP: BLE Connect ke ESP32S3-WiFi-Config
+    ESP->>APP: BLE Connection OK, LED Hijau
 
-    APP->>ESP: Command: "SCAN_WIFI"
+    APP->>ESP: Command SCAN
+    ESP->>APP: Response STATUS Scanning...
     ESP->>ESP: Scan jaringan WiFi
-    ESP->>APP: Response: "WIFI_LIST:SSID1,SSID2,SSID3"
+    ESP->>APP: Response COUNT 3
+    Note over ESP,APP: BATCH format: index,SSID,RSSI,enkripsi (S=Secured O=Open)
+    ESP->>APP: Response BATCH 0,SSID1,-65,S / 1,SSID2,-72,S / 2,SSID3,-80,O
+    ESP->>APP: Response STATUS Done
 
-    APP->>ESP: Command: "CONNECT:SSID|password"
+    APP->>ESP: Command CONNECT SSID password
+    ESP->>APP: Response CONNECT CONNECTING
     ESP->>ESP: Simpan ke NVS
     ESP->>ESP: WiFi.begin(ssid, pass)
 
     alt WiFi berhasil
-        ESP->>APP: Response: "IP:192.168.1.xxx"
+        ESP->>APP: Response IP 192.168.1.xxx
+        ESP->>APP: Response CONNECT SUCCESS
+        ESP->>APP: Response BLE DISCONNECT
         ESP->>ESP: BLE Off, start WebSocket
         APP->>ESP: WebSocket Connect ws://192.168.1.xxx/ws
         ESP-->>APP: Binary stream JPEG frames
     else WiFi gagal
-        ESP->>APP: Response: "ERROR:Connection failed"
+        ESP->>APP: Response CONNECT FAILED Connection timeout
     end
+```
+
+### Format BATCH Data WiFi
+
+Setiap jaringan dalam response `BATCH:` dikirim dalam format berikut, dipisah titik koma (`;`):
+
+```
+BATCH:<index>|<SSID>|<RSSI>|<enkripsi>;<index>|<SSID>|<RSSI>|<enkripsi>...
+
+Keterangan enkripsi:
+  S = Secured (ada password)
+  O = Open (tanpa password)
+
+Contoh:
+  BATCH:0|MyWiFi|-65|S;1|CafeGuest|-78|O;2|AndroidAP|-80|S
 ```
 
 ### Flowchart Reset Credential WiFi
@@ -146,6 +173,46 @@ flowchart LR
     J --> K[Restart BLE Advertising]
     K --> L([LED Biru berkedip<br/>Siap provisioning ulang])
 ```
+
+---
+
+## Protokol BLE Provisioning
+
+### BLE Service & Characteristics
+
+| UUID | Nama | Properti | Fungsi |
+|------|------|----------|--------|
+| `4fafc201-1fb5-459e-8fcc-c5c9c331914b` | SERVICE | - | BLE Service utama |
+| `beb5483e-36e1-4688-b7f5-ea07361b26a8` | CHAR_COMMAND | WRITE | Android → ESP32: kirim perintah |
+| `cba1d466-344c-4be3-ab3f-189f80dd7518` | CHAR_RESPONSE | READ + NOTIFY | ESP32 → Android: kirim respons |
+
+### BLE Device Name
+
+```
+ESP32S3-WiFi-Config
+```
+
+### Command dari Android ke ESP32 (via CHAR_COMMAND)
+
+| Command | Format | Aksi di ESP32 |
+|---------|--------|---------------|
+| Scan WiFi | `SCAN` | ESP32 scan jaringan, kirim `COUNT:n` + `BATCH:...` |
+| Koneksi WiFi | `CONNECT:<SSID>\|<password>` | ESP32 konek ke WiFi, kirim IP atau error |
+
+### Response dari ESP32 ke Android (via CHAR_RESPONSE Notify)
+
+| Response | Keterangan |
+|----------|------------|
+| `STATUS:Scanning...` | ESP32 sedang scan WiFi |
+| `COUNT:<n>` | Jumlah total jaringan ditemukan |
+| `BATCH:<data>` | Satu batch daftar SSID (format lihat di atas) |
+| `STATUS:Done` | Scan selesai |
+| `CONNECT:CONNECTING` | Sedang mencoba konek WiFi |
+| `IP:<x.x.x.x>` | Sukses! Berisi IP address ESP32 |
+| `CONNECT:SUCCESS` | Konfirmasi koneksi WiFi berhasil |
+| `BLE:DISCONNECT` | Pemberitahuan BLE akan dimatikan |
+| `CONNECT:FAILED:Connection timeout` | Gagal konek WiFi (timeout 20 detik) |
+| `ERROR:Unknown command` | Command tidak dikenal |
 
 ---
 
@@ -187,6 +254,35 @@ Format    : Binary (bukan text)
 | **Frame drop** | Server skip frame jika heap < 30KB untuk hindari crash |
 | **Quality control** | Client dapat kirim `0xA1 <quality>` untuk ubah kualitas JPEG real-time |
 | **Extensible** | Frame type `0x02` (IMU) dan `0x04` (ToF) sudah disiapkan untuk sensor masa depan |
+| **Pre-allocated buffer** | Buffer WebSocket dialokasikan di PSRAM, hindari malloc/free per frame |
+
+---
+
+## Power Save Mode
+
+Jika tidak ada client WebSocket yang terhubung selama **30 detik**, ESP32 masuk ke **Power Save Mode**:
+
+- Frame kamera **tidak diambil dan tidak dikirim** (kamera tetap aktif, hanya capture yang ditangguhkan)
+- LED berkedip **merah pelan** (interval 1,5 detik)
+- **Otomatis keluar** dari mode ini begitu ada client yang reconnect
+
+```
+Kondisi trigger : ws.count() == 0 selama > 30 detik (POWER_SAVE_TIMEOUT)
+Kondisi keluar  : Client baru connect via WebSocket
+```
+
+---
+
+## WiFi Auto-Reconnect
+
+ESP32 memiliki dua lapisan mekanisme reconnect WiFi:
+
+| Layer | Mekanisme | Detail |
+|-------|-----------|--------|
+| **Layer 1** | `WiFi.setAutoReconnect(true)` | Built-in ESP32: reconnect otomatis jika sinyal hilang sebentar |
+| **Layer 2** | Monitoring manual setiap 1 detik | Jika `WiFi.status() != WL_CONNECTED`, panggil `WiFi.begin()` ulang |
+
+Jika WiFi terputus selama **> 30 detik**, kamera dinonaktifkan sementara (`esp_camera_deinit()`) untuk menghemat daya. Saat WiFi berhasil tersambung kembali, kamera akan **diinisialisasi ulang otomatis**.
 
 ---
 
@@ -205,6 +301,14 @@ Reset dilakukan dengan menekan **tombol BOOT (GPIO 0)** selama tepat **5 detik**
 
 > **Jika tombol dilepas sebelum 5 detik** — tidak ada yang terjadi, reset dibatalkan.
 
+### Urutan proses saat reset berhasil:
+1. Hapus credentials dari NVS (`Preferences.clear()`)
+2. Tutup semua koneksi WebSocket aktif
+3. Disconnect WiFi & matikan radio WiFi (`WiFi.mode(WIFI_OFF)`)
+4. Deinit BLE stack yang lama (jika masih aktif)
+5. Init ulang BLE dari kondisi bersih
+6. LED Biru berkedip — siap provisioning ulang
+
 ---
 
 ## Konfigurasi & Optimasi Kamera
@@ -218,6 +322,21 @@ cfg.pixel_format = PIXFORMAT_JPEG; // Hardware JPEG (OV2640 built-in encoder)
 cfg.jpeg_quality = 15;             // 0=terbaik, 63=terburuk (15=balance)
 cfg.fb_count     = 3;              // Triple buffer PSRAM: pipeline smooth
 cfg.grab_mode    = CAMERA_GRAB_LATEST; // Selalu ambil frame terbaru
+```
+
+### Pengaturan Sensor Otomatis
+
+```cpp
+s->set_whitebal(s, 1);      // White balance otomatis
+s->set_awb_gain(s, 1);      // Auto white balance gain
+s->set_exposure_ctrl(s, 1); // Exposure control otomatis
+s->set_aec2(s, 1);          // AEC DSP (auto exposure)
+s->set_gain_ctrl(s, 1);     // Gain control otomatis
+s->set_bpc(s, 1);           // Bad pixel correction
+s->set_wpc(s, 1);           // White pixel correction
+s->set_raw_gma(s, 1);       // Gamma correction
+s->set_lenc(s, 1);          // Lens correction
+s->set_gainceiling(s, (gainceiling_t)6); // Gain ceiling
 ```
 
 ### Jika Masih Lag
@@ -239,6 +358,7 @@ cfg.frame_size = FRAMESIZE_QVGA;
 ```cpp
 WiFi.setSleep(false);        // KRITIKAL: nonaktifkan power saving WiFi
 WiFi.setAutoReconnect(true); // Auto-reconnect jika sinyal hilang
+WiFi.persistent(false);      // Jangan simpan ke flash (kita punya NVS sendiri)
 ```
 
 ---
@@ -308,10 +428,10 @@ Library Manager (`Ctrl+Shift+I`):
 | Warna | Kondisi |
 |-------|---------|
 | 🔵 Biru berkedip | Menunggu koneksi BLE dari Android |
+| 🟢 Hijau solid | BLE client terhubung / WiFi terkoneksi & WebSocket aktif |
 | 🟡 Kuning | Sedang koneksi WiFi |
-| 🟢 Hijau | WiFi terkoneksi, WebSocket aktif |
 | 🔴 Merah berkedip cepat | Error (kamera gagal init, dll) |
-| 🔴 Merah berkedip pelan | **Power Save Mode** (Klien disconnect > 30s, capture ditangguhkan) |
+| 🔴 Merah berkedip pelan | **Power Save Mode** (klien disconnect > 30 detik, capture ditangguhkan) |
 | 🟣 Magenta | Proses reset credential |
 | ⚪ Putih blink | Konfirmasi reset berhasil |
 
@@ -319,5 +439,5 @@ Library Manager (`Ctrl+Shift+I`):
 
 ## Lihat Juga
 
-- 📱 **Android App** → [`phase4-camera-eps-s3-mobile/README.md`](../README.md)
+- 📱 **Android App** → [`README.md`](../../../README.md)
 - 📊 **Wiring Diagram** → [`wiring-diagram.md`](./wiring-diagram.md)
